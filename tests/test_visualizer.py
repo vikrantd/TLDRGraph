@@ -43,3 +43,48 @@ def test_generate_visualizer_html_file(mini_repo):
     assert "HIERARCHY =" in content
     assert "LAYERS_CONFIG =" in content
     assert "CodeChakra" in content
+
+
+def test_payload_carries_source_pointers_not_source_text(mini_repo):
+    """Content is read live by the app; the payload only points at it."""
+    from codechakra.visualizer import prepare_visualizer_data
+
+    data = prepare_visualizer_data(str(mini_repo.root))
+
+    assert data["root"] == os.path.abspath(str(mini_repo.root))
+    assert data["nodes"], "expected at least one symbol node"
+
+    for node in data["nodes"]:
+        assert "code" not in node, "source text must not be inlined"
+        assert node["path"], "every node needs a path to load from"
+        assert node["name"], "every node needs a symbol name to re-resolve with"
+        assert isinstance(node["code_start"], int)
+
+    for module in data["modules"]:
+        assert module["path"]
+
+
+def test_file_less_pseudo_nodes_are_dropped(mini_repo):
+    """Imported names and bare decorators have no file and no navigable target."""
+    from codechakra.visualizer import prepare_visualizer_data
+
+    data = prepare_visualizer_data(str(mini_repo.root))
+
+    assert not any(m["label"] == "root_fixtures" for m in data["modules"])
+    assert all(n["file"] not in ("", "project root") for n in data["nodes"])
+
+
+def test_generated_html_contains_no_project_source(mini_repo):
+    """A generated page must not smuggle file contents into the payload."""
+    from codechakra.visualizer import generate_visualizer_html
+
+    html_path = generate_visualizer_html(str(mini_repo.root))
+    with open(html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # A distinctive line from the fixture sources must not appear anywhere.
+    for source_file in mini_repo.root.rglob("*.py"):
+        for line in source_file.read_text(encoding="utf-8").split("\n"):
+            stripped = line.strip()
+            if len(stripped) > 40 and "def " in stripped:
+                assert stripped not in content

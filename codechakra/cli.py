@@ -291,11 +291,63 @@ def scan(path, rebuild, propose_layers, embeddings):
 
 @cli.command(name="ui")
 @click.option("--path", default=".", help="Repository root path")
-def visualizer_cmd(path):
+@click.option("--serve", is_flag=True, help="Serve the repo locally so the visualizer can read source files")
+@click.option("--port", default=8777, help="Port for --serve")
+@click.option("--open/--no-open", "open_browser", default=True, help="Open the visualizer in a browser (with --serve)")
+def visualizer_cmd(path, serve, port, open_browser):
     """Generate and view interactive standalone HTML visualizer (.codechakra/CODECHAKRA_VISUALIZER.html)."""
     html_path = generate_visualizer_html(path)
     click.echo(f"\n🌐 [CodeChakra Visualizer]: {os.path.abspath(html_path)}")
-    click.echo("Open this file in any web browser to explore all architectural layers and cross-layer connections interactively!\n")
+
+    if not serve:
+        click.echo("Open this file in any web browser to explore all architectural layers and cross-layer connections interactively!")
+        click.echo("Source code is read live: use 'Connect project' in the page, or rerun with --serve to skip the prompt.\n")
+        return
+
+    serve_visualizer(path, html_path, port, open_browser)
+
+
+def serve_visualizer(path: str, html_path: str, port: int, open_browser: bool = True) -> None:
+    """
+    Serves the repository root over localhost so the visualizer can fetch source
+    files directly. Read-only, bound to the loopback interface.
+    """
+    import functools
+    import http.server
+    import socketserver
+    import threading
+    import webbrowser
+
+    root = os.path.abspath(path)
+    rel_html = os.path.relpath(os.path.abspath(html_path), root).replace(os.sep, "/")
+
+    class QuietHandler(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, fmt, *args):  # noqa: A003 - stdlib signature
+            pass
+
+    handler = functools.partial(QuietHandler, directory=root)
+    socketserver.TCPServer.allow_reuse_address = True
+
+    try:
+        httpd = socketserver.TCPServer(("127.0.0.1", port), handler)
+    except OSError as exc:
+        raise click.ClickException(
+            f"Could not bind port {port}: {exc}. Pick another with --port."
+        )
+
+    url = f"127.0.0.1:{port}/{rel_html}"
+    click.echo(f"📡 Serving {root} at http://{url}")
+    click.echo("   Source files load live from this server. Press Ctrl+C to stop.\n")
+
+    if open_browser:
+        threading.Timer(0.5, lambda: webbrowser.open(f"http://{url}")).start()
+
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("\n👋 Visualizer server stopped.")
+    finally:
+        httpd.server_close()
 
 
 @cli.command()

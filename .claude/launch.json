@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "visualizer-preview",
+      "runtimeExecutable": "venv/bin/codechakra",
+      "runtimeArgs": ["ui", "--serve", "--no-open", "--port", "8931"],
+      "port": 8931,
+      "url": "http://localhost:8931"
+    }
+  ]
+}

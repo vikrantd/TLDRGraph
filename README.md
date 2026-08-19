@@ -48,6 +48,21 @@ codechakra layers
 `query`, `trace`, `layers` and `dead-code` are **read commands**: they never trigger
 enrichment and never rewrite your enriched intents.
 
+### 4c. Explore the Architecture Visually
+```bash
+codechakra ui --serve
+```
+
+Opens the interactive canvas: modules at low zoom, symbols as you zoom in, and
+click-to-focus that isolates a node with its callers and callees. The focused
+card shows the symbol's intent, inputs, outputs and its **live source code**,
+and `V` opens the whole file with a symbol outline.
+
+Source is read from disk on demand, never baked into the HTML. `--serve` runs a
+read-only localhost server so the page can fetch files directly. Without it,
+`codechakra ui` still writes the standalone page - open it and use **Connect
+project** to grant the browser read access to the repository folder.
+
 ### 5. Install Agent Rules (for AI Assistants)
 ```bash
 codechakra install
@@ -130,3 +145,5 @@ CodeChakra has no delete capability and will not gain one.
 - `.codechakra/flows.yaml`  : Exported trace paths and flows for visualization tools.
 - `.codechakra/codechakra.db`: Local SQLite content-hash cache for zero-token incremental updates.
 - `.codechakra/AGENT_CONTRACT.md`: The enrichment request/response contract, installed by `codechakra install`.
+- `.codechakra/CODECHAKRA_VISUALIZER.html`: Standalone interactive visualizer. Self-contained (no CDN, no bundler);
+  project source is read live rather than embedded, so the page stays small and never goes stale.

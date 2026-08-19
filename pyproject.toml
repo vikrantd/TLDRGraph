@@ -30,3 +30,6 @@ codechakra = "codechakra.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["codechakra*"]
+
+[tool.setuptools.package-data]
+"codechakra.visualizer" = ["assets/*.html", "assets/*.css", "assets/*.js"]
