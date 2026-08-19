@@ -18,8 +18,8 @@ import sqlite3
 
 import pytest
 
-from codechakra.graph_loader import GraphLoader
-from codechakra.hash_gate import HashGate
+from tldrgraph.graph_loader import GraphLoader
+from tldrgraph.hash_gate import HashGate
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ def test_schema_version_is_two():
 
 
 def test_intent_round_trips_through_update_and_check(tmp_path):
-    gate = HashGate(str(tmp_path / ".codechakra" / "codechakra.db"))
+    gate = HashGate(str(tmp_path / ".tldrgraph" / "tldrgraph.db"))
     gate.update_node(
         node_id="n1",
         file_path="backend/src/a.ts",
@@ -176,7 +176,7 @@ def test_intent_round_trips_through_update_and_check(tmp_path):
 
 
 def test_intent_defaults_to_empty_string(tmp_path):
-    gate = HashGate(str(tmp_path / ".codechakra" / "codechakra.db"))
+    gate = HashGate(str(tmp_path / ".tldrgraph" / "tldrgraph.db"))
     gate.update_node(
         node_id="n2",
         file_path="b.ts",
@@ -189,7 +189,7 @@ def test_intent_defaults_to_empty_string(tmp_path):
 
 
 def test_fresh_db_is_stamped_at_version_two(tmp_path):
-    db = tmp_path / ".codechakra" / "codechakra.db"
+    db = tmp_path / ".tldrgraph" / "tldrgraph.db"
     HashGate(str(db))
     assert _user_version(db) == 2
 
@@ -230,7 +230,7 @@ def _node_ids(db_path):
 @pytest.fixture
 def legacy_db(tmp_path):
     """A v1-shaped database: no intent column, user_version 0, mixed rows."""
-    db = tmp_path / ".codechakra" / "codechakra.db"
+    db = tmp_path / ".tldrgraph" / "tldrgraph.db"
     db.parent.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(str(db))

@@ -19,10 +19,10 @@ import json
 
 import pytest
 
-from codechakra import extractors as ex
-from codechakra import labels as lb
-from codechakra.graph_loader import GraphLoader
-from codechakra.hierarchy import (
+from tldrgraph import extractors as ex
+from tldrgraph import labels as lb
+from tldrgraph.graph_loader import GraphLoader
+from tldrgraph.hierarchy import (
     HIERARCHY_SCHEMA,
     MULTI_PARENT_RULE,
     PAGE_CONTAINS_RELATION,
@@ -35,7 +35,7 @@ from codechakra.hierarchy import (
     page_route,
     subnode_id,
 )
-from codechakra.layers import LAYER_API, LAYER_UI
+from tldrgraph.layers import LAYER_API, LAYER_UI
 
 
 ORDERS_PAGE = """\
@@ -375,7 +375,7 @@ def test_display_labels_fall_back_to_the_path_when_there_is_no_owner():
 def test_snapshot_persists_display_label_next_to_label(repo):
     loader = GraphLoader(str(repo))
     loader.load_or_extract(enrich_llm=False, rebuild=True)
-    snapshot = json.loads((repo / ".codechakra/graph.json").read_text(encoding="utf-8"))
+    snapshot = json.loads((repo / ".tldrgraph/graph.json").read_text(encoding="utf-8"))
 
     by_id = {n["id"]: n for n in snapshot["nodes"]}
     assert by_id["ctl_ctor"]["label"] == ".constructor()"
@@ -507,7 +507,7 @@ def test_parent_and_child_links_are_symmetric(hierarchy):
 
 def test_reading_the_snapshot_neither_doubles_seams_nor_buries_endpoints(repo):
     """
-    ``build_multilayer_hierarchy`` prefers ``.codechakra/graph.json`` over
+    ``build_multilayer_hierarchy`` prefers ``.tldrgraph/graph.json`` over
     ``graphify-out/graph.json`` when it exists, and that snapshot carries both
     the synthesized endpoint nodes and the re-derivable seam edges. Reading it
     must not emit the seams twice, and must not fold endpoints back into the
@@ -520,7 +520,7 @@ def test_reading_the_snapshot_neither_doubles_seams_nor_buries_endpoints(repo):
     from_graphify = build_multilayer_hierarchy(str(repo))
 
     GraphLoader(str(repo)).load_or_extract(enrich_llm=False, rebuild=True)
-    assert (repo / ".codechakra/graph.json").exists()
+    assert (repo / ".tldrgraph/graph.json").exists()
     from_snapshot = build_multilayer_hierarchy(str(repo))
 
     def shape(data):

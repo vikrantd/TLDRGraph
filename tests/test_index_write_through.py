@@ -24,8 +24,8 @@ import json
 
 import pytest
 
-from codechakra import graph_loader as gl_mod
-from codechakra.graph_loader import GraphLoader
+from tldrgraph import graph_loader as gl_mod
+from tldrgraph.graph_loader import GraphLoader
 
 
 SCORE_FLOOR = 0.35
@@ -128,7 +128,7 @@ def test_bridge_is_created_on_a_completely_fresh_scan(mini_repo, stub_enricher, 
     target_label = mini_repo.label("svc_pension")  # "PensionCalculatorService"
     stub_enricher(lambda n: [target_label] if n["id"] == ui else [])
 
-    assert not mini_repo.codechakra_dir.exists(), "fixture directory must be fresh"
+    assert not mini_repo.tldrgraph_dir.exists(), "fixture directory must be fresh"
 
     loader = GraphLoader(str(mini_repo.root))
     graph = loader.load_or_extract(enrich_llm=True)

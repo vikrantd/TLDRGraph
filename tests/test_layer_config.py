@@ -7,17 +7,17 @@ import os
 import pytest
 from click.testing import CliRunner
 
-from codechakra.cli import cli
-from codechakra.classifier import classify_node, classify_node_with_source
-from codechakra.graph_loader import GraphLoader
-from codechakra.layer_config import (
+from tldrgraph.cli import cli
+from tldrgraph.classifier import classify_node, classify_node_with_source
+from tldrgraph.graph_loader import GraphLoader
+from tldrgraph.layer_config import (
     CONFIG_FILENAME_YAML,
     compute_registry_hash,
     load_layer_config,
     save_layer_config,
     validate_layer_config,
 )
-from codechakra.layers import (
+from tldrgraph.layers import (
     DEFAULT_LAYERS,
     LAYER_API,
     LAYER_DATA,
@@ -31,11 +31,11 @@ from codechakra.layers import (
     set_registry,
     use_registry,
 )
-from codechakra.propose_layers import (
+from tldrgraph.propose_layers import (
     apply_proposed_layers,
     generate_propose_request,
 )
-from codechakra.rules import Rule
+from tldrgraph.rules import Rule
 
 
 @pytest.fixture(autouse=True)
@@ -195,7 +195,7 @@ def test_propose_layers_cli_command(tmp_path):
     res = runner.invoke(cli, ["propose-layers", "--path", str(tmp_path)])
     assert res.exit_code == 0
 
-    req_file = tmp_path / ".codechakra" / "propose_layers_request.json"
+    req_file = tmp_path / ".tldrgraph" / "propose_layers_request.json"
     assert req_file.is_file()
     data = json.loads(req_file.read_text(encoding="utf-8"))
     assert data["schema"] == "codechakra/propose-layers-request@1"
@@ -203,8 +203,8 @@ def test_propose_layers_cli_command(tmp_path):
 
 
 def test_apply_layers_cli_command(tmp_path):
-    (tmp_path / ".codechakra").mkdir(parents=True)
-    resp_file = tmp_path / ".codechakra" / "propose_layers_response.json"
+    (tmp_path / ".tldrgraph").mkdir(parents=True)
+    resp_file = tmp_path / ".tldrgraph" / "propose_layers_response.json"
     proposal = {
         "utility_id": "utility",
         "layers": [
@@ -237,7 +237,7 @@ def test_apply_layers_cli_command(tmp_path):
     res = runner.invoke(cli, ["apply-layers", "--path", str(tmp_path)])
     assert res.exit_code == 0
 
-    config_file = tmp_path / ".codechakra" / "layers.config.yaml"
+    config_file = tmp_path / ".tldrgraph" / "layers.config.yaml"
     assert config_file.is_file()
 
     registry, chash = load_layer_config(str(tmp_path))
@@ -267,7 +267,7 @@ def test_enrichment_survives_layer_set_change(mini_repo):
     assert g1.nodes[pension_calc]["layer_id"] == LAYER_SERVICE
 
     # 2. Apply enrichment
-    resp_path = mini_repo.root / ".codechakra" / "enrichment_response.json"
+    resp_path = mini_repo.root / ".tldrgraph" / "enrichment_response.json"
     resp_path.write_text(json.dumps([
         {
             "id": case_view,
@@ -323,7 +323,7 @@ def test_enrichment_survives_layer_set_change(mini_repo):
             }
         ]
     }
-    config_file = mini_repo.root / ".codechakra" / "layers.config.yaml"
+    config_file = mini_repo.root / ".tldrgraph" / "layers.config.yaml"
     import yaml
     config_file.write_text(yaml.dump(custom_layers), encoding="utf-8")
 

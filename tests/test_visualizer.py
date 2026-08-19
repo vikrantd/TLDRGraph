@@ -1,10 +1,10 @@
 """
-Tests for CodeChakra Standalone Interactive Visualizer (Phase 4).
+Tests for TLDRGraph Standalone Interactive Visualizer (Phase 4).
 """
 
 import os
-from codechakra.layers import default_registry, set_registry, use_registry
-from codechakra.visualizer import build_layers_config, generate_visualizer_html
+from tldrgraph.layers import default_registry, set_registry, use_registry
+from tldrgraph.visualizer import build_layers_config, generate_visualizer_html
 
 
 def test_build_layers_config_default_registry():
@@ -26,7 +26,7 @@ def test_build_layers_config_custom_registry():
 def test_generate_visualizer_html_file(mini_repo):
     html_path = generate_visualizer_html(str(mini_repo.root))
     assert os.path.isfile(html_path)
-    assert html_path.endswith("CODECHAKRA_VISUALIZER.html")
+    assert html_path.endswith("TLDRGRAPH_VISUALIZER.html")
 
     with open(html_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -42,12 +42,12 @@ def test_generate_visualizer_html_file(mini_repo):
     assert "<!DOCTYPE html>" in content
     assert "HIERARCHY =" in content
     assert "LAYERS_CONFIG =" in content
-    assert "CodeChakra" in content
+    assert "TLDRGraph" in content
 
 
 def test_payload_carries_source_pointers_not_source_text(mini_repo):
     """Content is read live by the app; the payload only points at it."""
-    from codechakra.visualizer import prepare_visualizer_data
+    from tldrgraph.visualizer import prepare_visualizer_data
 
     data = prepare_visualizer_data(str(mini_repo.root))
 
@@ -66,7 +66,7 @@ def test_payload_carries_source_pointers_not_source_text(mini_repo):
 
 def test_file_less_pseudo_nodes_are_dropped(mini_repo):
     """Imported names and bare decorators have no file and no navigable target."""
-    from codechakra.visualizer import prepare_visualizer_data
+    from tldrgraph.visualizer import prepare_visualizer_data
 
     data = prepare_visualizer_data(str(mini_repo.root))
 
@@ -76,7 +76,7 @@ def test_file_less_pseudo_nodes_are_dropped(mini_repo):
 
 def test_generated_html_contains_no_project_source(mini_repo):
     """A generated page must not smuggle file contents into the payload."""
-    from codechakra.visualizer import generate_visualizer_html
+    from tldrgraph.visualizer import generate_visualizer_html
 
     html_path = generate_visualizer_html(str(mini_repo.root))
     with open(html_path, "r", encoding="utf-8") as f:

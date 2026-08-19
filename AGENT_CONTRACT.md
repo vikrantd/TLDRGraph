@@ -1,8 +1,8 @@
-# CodeChakra Agent Contract
+# TLDRGraph Agent Contract
 
 **Audience: the coding agent with this repository open** (Claude Code, Cursor, Antigravity).
 
-CodeChakra builds a 6-layer architectural graph from the graphify AST export. Structure
+TLDRGraph builds a 6-layer architectural graph from the graphify AST export. Structure
 *within* a layer, and the high-volume deterministic seams between layers, are extracted
 automatically. What cannot be extracted automatically is:
 
@@ -18,11 +18,11 @@ and a path (`snippet` is never populated), so it guesses. You do not have to gue
 ## The loop
 
 ```bash
-codechakra queue-enrichment --limit 50   # 1. writes .codechakra/enrichment_request.yaml
+tldrgraph queue-enrichment --limit 50   # 1. writes .tldrgraph/enrichment_request.yaml
 #                                          2. you read it, read the SOURCE, and write
-#                                             .codechakra/enrichment_response.yaml
-codechakra apply-enrichment              # 3. merges into the graph, cache and index
-codechakra queue-enrichment --limit 50   # 4. repeat -- the queue advances automatically
+#                                             .tldrgraph/enrichment_response.yaml
+tldrgraph apply-enrichment              # 3. merges into the graph, cache and index
+tldrgraph queue-enrichment --limit 50   # 4. repeat -- the queue advances automatically
 ```
 
 Request and response are **separate files**. Never write your answer back into
@@ -30,10 +30,10 @@ Request and response are **separate files**. Never write your answer back into
 
 | File | Written by | Read by |
 | --- | --- | --- |
-| `.codechakra/enrichment_request.yaml` (or `enrichment_request.json`) | `queue-enrichment` | you |
-| `.codechakra/enrichment_response.yaml` (or `enrichment_response.json`) | **you** | `apply-enrichment` |
-| `.codechakra/enrichment_cursor.json` | both commands | both commands |
-| `.codechakra/pending_enrichment.json` | *(legacy)* | `apply-enrichment`, only if no response file exists |
+| `.tldrgraph/enrichment_request.yaml` (or `enrichment_request.json`) | `queue-enrichment` | you |
+| `.tldrgraph/enrichment_response.yaml` (or `enrichment_response.json`) | **you** | `apply-enrichment` |
+| `.tldrgraph/enrichment_cursor.json` | both commands | both commands |
+| `.tldrgraph/pending_enrichment.json` | *(legacy)* | `apply-enrichment`, only if no response file exists |
 
 ---
 
@@ -42,8 +42,8 @@ Request and response are **separate files**. Never write your answer back into
 ```yaml
 schema: codechakra/enrichment-request@1
 generated_at: "2026-08-19T00:00:00+00:00"
-response_file: .codechakra/enrichment_response.yaml
-contract: .codechakra/AGENT_CONTRACT.md
+response_file: .tldrgraph/enrichment_response.yaml
+contract: .tldrgraph/AGENT_CONTRACT.md
 progress:
   total_candidates: 1873   # un-enriched, non-utility nodes
   already_enriched: 12     # nodes that already carry an intent
@@ -97,7 +97,7 @@ A **YAML list** (preferred) or **JSON array** of objects:
     - pension_cases
 ```
 
-Equivalent JSON format (also accepted from `.codechakra/enrichment_response.json` or `.codechakra/pending_enrichment.json`):
+Equivalent JSON format (also accepted from `.tldrgraph/enrichment_response.json` or `.tldrgraph/pending_enrichment.json`):
 ```json
 [
   {
@@ -168,20 +168,20 @@ and either has no intent at all, or has one that came from the offline template 
 (`enrichment_source: "heuristic"`, i.e. nobody read the source). Candidates are sorted by:
 
 1. **`cross_layer_degree` descending** — neighbours that sit in a *different* layer.
-   These are the seams CodeChakra exists to describe, and they are exactly where the AST
+   These are the seams TLDRGraph exists to describe, and they are exactly where the AST
    alone is weakest.
 2. **`degree` descending** — total in + out edges. Hub nodes first.
 3. **node id ascending** — only to make the ordering deterministic.
 
 Both degrees are computed from the live graph. (The `degree` key that graphify emits is
-absent, so anything reading `node["degree"]` from the raw export sees `0`; CodeChakra
-recomputes it and stamps it back into `.codechakra/graph.json`.)
+absent, so anything reading `node["degree"]` from the raw export sees `0`; TLDRGraph
+recomputes it and stamps it back into `.tldrgraph/graph.json`.)
 
 ---
 
 ## Paging and progress
 
-`queue-enrichment` remembers what it has handed out in `.codechakra/enrichment_cursor.json`:
+`queue-enrichment` remembers what it has handed out in `.tldrgraph/enrichment_cursor.json`:
 
 - `applied` — ids successfully merged by `apply-enrichment`. Never re-queued.
 - `queued` — ids handed out but not yet applied ("in flight"). Skipped by default.
@@ -204,7 +204,7 @@ For each object it can match to a node:
    work survives re-scans and is not redone until the file actually changes;
 3. resolves every `calls` entry through the vector index and, above the `0.35` floor,
    adds a `cross_layer_link` edge;
-4. re-indexes and persists `.codechakra/graph.json` plus `.codechakra/layers.yaml`.
+4. re-indexes and persists `.tldrgraph/graph.json` plus `.tldrgraph/layers.yaml`.
 
 It then records the ids in the cursor so the next `queue-enrichment` moves on.
 
@@ -213,11 +213,11 @@ It then records the ids in the cursor so the next `queue-enrichment` moves on.
 ## Related commands
 
 ```bash
-codechakra scan .                       # rebuild layers + index from graphify-out/
-codechakra query "pension approval"     # semantic search + end-to-end flow trace
-codechakra trace AaoDeskView pension_cases
-codechakra layers                       # node counts per layer
-codechakra dead-code --status candidate # nodes worth a human/agent review
+tldrgraph scan .                       # rebuild layers + index from graphify-out/
+tldrgraph query "pension approval"     # semantic search + end-to-end flow trace
+tldrgraph trace AaoDeskView pension_cases
+tldrgraph layers                       # node counts per layer
+tldrgraph dead-code --status candidate # nodes worth a human/agent review
 ```
 
 `query`, `trace`, `layers` and `dead-code` are read commands: they never trigger
@@ -234,6 +234,6 @@ enrichment.
 | `candidate` | **Worth reviewing.** Nothing observed reaches it — which is evidence, not proof. |
 | `unreviewed` | **Not enough evidence to conclude anything.** Never treat as removable. |
 
-CodeChakra has no delete capability and will not gain one. Reflection, DI containers,
+TLDRGraph has no delete capability and will not gain one. Reflection, DI containers,
 string-built routes, template references and test-only entry points all produce nodes the
 static graph cannot see. Confirm with the source before removing anything.

@@ -1,5 +1,5 @@
 """
-Regression suite for the CodeChakra host-agent loop.
+Regression suite for the TLDRGraph host-agent loop.
 
 Covers the three pieces that make `queue-enrichment -> agent -> apply-enrichment`
 survivable:
@@ -13,7 +13,7 @@ Plus the installer, the `dead-code` review list, and the read-only guarantee on
 `query` / `trace` / `layers`.
 
 Fixtures are local to this module on purpose; nothing here reads the real repository,
-the real ``graphify-out/`` or the real ``.codechakra/``, and nothing makes a network call.
+the real ``graphify-out/`` or the real ``.tldrgraph/``, and nothing makes a network call.
 """
 
 import json
@@ -23,9 +23,9 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from codechakra import cli as cli_module
-from codechakra import installer as installer_module
-from codechakra.cli import (
+from tldrgraph import cli as cli_module
+from tldrgraph import installer as installer_module
+from tldrgraph.cli import (
     CURSOR_FILENAME,
     LEGACY_FILENAME,
     REQUEST_FILENAME,
@@ -114,14 +114,14 @@ def loop_repo(tmp_path) -> Path:
 
 @pytest.fixture
 def run(loop_repo):
-    """Invoke a CodeChakra command against the mini-repo and assert it succeeded."""
+    """Invoke a TLDRGraph command against the mini-repo and assert it succeeded."""
     runner = CliRunner()
 
     def _run(*args, expect_ok=True):
         result = runner.invoke(cli, list(args) + ["--path", str(loop_repo)])
         if expect_ok and result.exit_code != 0:
             raise AssertionError(
-                f"`codechakra {' '.join(args)}` failed ({result.exit_code}):\n"
+                f"`tldrgraph {' '.join(args)}` failed ({result.exit_code}):\n"
                 f"{result.output}\n{result.exception!r}"
             )
         return result
@@ -131,7 +131,7 @@ def run(loop_repo):
 
 @pytest.fixture
 def state(loop_repo):
-    """Reader for files under the mini-repo's .codechakra/ directory."""
+    """Reader for files under the mini-repo's .tldrgraph/ directory."""
 
     def _state(filename):
         path = loop_repo / STATE_DIR / filename
@@ -149,7 +149,7 @@ def state(loop_repo):
 @pytest.fixture
 def no_enrichment(monkeypatch):
     """Any call into the LLM enricher during the test is a hard failure."""
-    from codechakra.llm_enricher import LLMEnricher
+    from tldrgraph.llm_enricher import LLMEnricher
 
     def _boom(self, nodes_batch):  # pragma: no cover - only fires on regression
         raise AssertionError("a read-only command triggered LLM enrichment")
@@ -588,12 +588,12 @@ def test_install_writes_claude_cursor_and_antigravity(tmp_path):
     written = installer_module.install_agent_rules(str(tmp_path))
 
     expected = {
-        "contract": ".codechakra/AGENT_CONTRACT.md",
-        "claude_skill": ".claude/skills/codechakra/SKILL.md",
+        "contract": ".tldrgraph/AGENT_CONTRACT.md",
+        "claude_skill": ".claude/skills/tldrgraph/SKILL.md",
         "claude_md": "CLAUDE.md",
-        "cursor_rule": ".cursor/rules/codechakra.mdc",
-        "antigravity_rule": ".agents/rules/codechakra.md",
-        "antigravity_workflow": ".agents/workflows/codechakra.md",
+        "cursor_rule": ".cursor/rules/tldrgraph.mdc",
+        "antigravity_rule": ".agents/rules/tldrgraph.md",
+        "antigravity_workflow": ".agents/workflows/tldrgraph.md",
     }
     assert set(written) == set(expected)
     for key, rel in expected.items():
@@ -735,7 +735,7 @@ def test_state_filenames_are_the_documented_ones():
     assert REQUEST_FILENAME == "enrichment_request.yaml"
     assert RESPONSE_FILENAME == "enrichment_response.yaml"
     assert LEGACY_FILENAME == "pending_enrichment.json"
-    assert cli_module.STATE_DIR == ".codechakra"
+    assert cli_module.STATE_DIR == ".tldrgraph"
 
 
 def test_queue_request_includes_layer_id(run, state):
@@ -813,8 +813,8 @@ def test_apply_resolves_structured_dict_call(run, loop_repo, state):
 
 def test_disambiguate_duplicate_symbol_prioritizes_live_over_dead_code(loop_repo):
     import networkx as nx
-    from codechakra.graph_loader import resolve_call_target
-    from codechakra.vector_store import LocalVectorStore
+    from tldrgraph.graph_loader import resolve_call_target
+    from tldrgraph.vector_store import LocalVectorStore
 
     g = nx.DiGraph()
     # Source node

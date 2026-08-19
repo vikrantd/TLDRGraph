@@ -7,7 +7,7 @@ live only in the process that built them. ``export_yaml`` writes counts plus a
 nothing.
 
 Contract under test:
-  * a scan writes ``.codechakra/graph.json``
+  * a scan writes ``.tldrgraph/graph.json``
   * that snapshot holds EVERY node id and EVERY edge, not a sample
   * ``save_graph()`` / ``load_graph_snapshot()`` round-trip
   * on re-scan, bridge edges + intent + fields + non-placeholder summaries are
@@ -18,8 +18,8 @@ import json
 
 import pytest
 
-from codechakra import graph_loader as gl_mod
-from codechakra.graph_loader import GraphLoader
+from tldrgraph import graph_loader as gl_mod
+from tldrgraph.graph_loader import GraphLoader
 
 
 SENTINEL_INTENT = "Computes commuted pension value for a sanctioned case."
@@ -52,7 +52,7 @@ def test_bridge_relations_constant_exists():
 def test_scan_writes_graph_json(loader, mini_repo, no_network):
     loader.load_or_extract(enrich_llm=True)
     assert mini_repo.snapshot_path.exists(), (
-        "a scan must persist .codechakra/graph.json"
+        "a scan must persist .tldrgraph/graph.json"
     )
 
 
@@ -60,7 +60,7 @@ def test_snapshot_has_schema_envelope(loader, mini_repo, no_network):
     loader.load_or_extract(enrich_llm=True)
     snap = _snapshot(mini_repo)
 
-    assert snap["codechakra_version"] == "0.1.0"
+    assert snap["tldrgraph_version"] == "0.1.0"
     assert snap["schema_version"] == 1
     assert isinstance(snap["built_at"], str) and snap["built_at"]
     assert isinstance(snap["nodes"], list)

@@ -59,8 +59,11 @@ htmlcov/
 *.ses
 :memory:.ses
 
-# Graphify / Analysis outputs
+# Graphify / TLDRGraph analysis outputs & state
 graphify-out/
+.tldrgraph/
+.codechakra/
+scratch/
 
 # Operating System & IDE
 .DS_Store

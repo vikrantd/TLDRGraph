@@ -21,9 +21,9 @@ import os
 
 import pytest
 
-from codechakra import vector_store as vs
-from codechakra.graph_loader import BRIDGE_SCORE_FLOOR, bridge_score_floor
-from codechakra.vector_store import (
+from tldrgraph import vector_store as vs
+from tldrgraph.graph_loader import BRIDGE_SCORE_FLOOR, bridge_score_floor
+from tldrgraph.vector_store import (
     BACKEND_HYBRID,
     BACKEND_TFIDF,
     DenseEmbedder,
@@ -94,7 +94,7 @@ requires_model = pytest.mark.skipif(
 
 @pytest.fixture
 def index_path(tmp_path):
-    return str(tmp_path / ".codechakra" / "vector_index.json")
+    return str(tmp_path / ".tldrgraph" / "vector_index.json")
 
 
 @pytest.fixture
@@ -381,7 +381,7 @@ def test_diagnostics_explains_why_dense_is_off(index_path, monkeypatch):
 
 def test_doctor_command_runs_without_embeddings(tmp_path, monkeypatch):
     from click.testing import CliRunner
-    from codechakra.cli import cli
+    from tldrgraph.cli import cli
 
     monkeypatch.delenv(vs.EMBEDDINGS_ENV_VAR, raising=False)
     result = CliRunner().invoke(cli, ["doctor", "--path", str(tmp_path), "--embeddings", "off"])
@@ -392,7 +392,7 @@ def test_doctor_command_runs_without_embeddings(tmp_path, monkeypatch):
 
 def test_doctor_json_is_machine_readable(tmp_path, monkeypatch):
     from click.testing import CliRunner
-    from codechakra.cli import cli
+    from tldrgraph.cli import cli
 
     monkeypatch.delenv(vs.EMBEDDINGS_ENV_VAR, raising=False)
     result = CliRunner().invoke(
@@ -567,7 +567,7 @@ def test_sidecar_from_a_different_model_is_ignored(hybrid_store, index_path):
 @requires_model
 def test_doctor_reports_hybrid_when_it_is_live(tmp_path, hybrid_store):
     from click.testing import CliRunner
-    from codechakra.cli import cli
+    from tldrgraph.cli import cli
 
     root = os.path.dirname(os.path.dirname(hybrid_store.index_path))
     result = CliRunner().invoke(cli, ["doctor", "--path", root, "--embeddings", "auto", "--json"])
@@ -608,7 +608,7 @@ def test_empty_store_searches_cleanly(index_path):
 
 def test_graph_loader_defaults_to_tfidf(mini_repo):
     """End-to-end: a normal scan must not silently activate a dense backend."""
-    from codechakra.graph_loader import GraphLoader
+    from tldrgraph.graph_loader import GraphLoader
 
     loader = GraphLoader(str(mini_repo.root))
     loader.load_or_extract(enrich_llm=False)

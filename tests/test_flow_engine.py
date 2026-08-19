@@ -1,9 +1,9 @@
 """
-Regression tests for the CodeChakra flow/query surface (``codechakra.flow_engine``).
+Regression tests for the TLDRGraph flow/query surface (``tldrgraph.flow_engine``).
 
 Everything here is hermetic: a small synthetic graph plus a real
 ``LocalVectorStore`` written under pytest's ``tmp_path``. Nothing reads the real
-repository, the real ``graphify-out/`` or the real ``.codechakra/`` state, and
+repository, the real ``graphify-out/`` or the real ``.tldrgraph/`` state, and
 nothing makes a network call. Fixtures are defined locally in this file on
 purpose -- the shared ``conftest.py`` is owned elsewhere.
 
@@ -26,7 +26,7 @@ import networkx as nx
 import pytest
 
 # --------------------------------------------------------------------------- #
-# Import hygiene: make sure `codechakra` resolves to the source tree under test
+# Import hygiene: make sure `tldrgraph` resolves to the source tree under test
 # even when pytest is launched from the repo root (see conftest for the why).
 # --------------------------------------------------------------------------- #
 _PKG_PARENT = str(Path(__file__).resolve().parent.parent)
@@ -34,10 +34,10 @@ if _PKG_PARENT in sys.path:
     sys.path.remove(_PKG_PARENT)
 sys.path.insert(0, _PKG_PARENT)
 
-from codechakra import flow_engine as fe  # noqa: E402
-from codechakra.classifier import LayerType  # noqa: E402
-from codechakra.flow_engine import FlowEngine  # noqa: E402
-from codechakra.vector_store import LocalVectorStore  # noqa: E402
+from tldrgraph import flow_engine as fe  # noqa: E402
+from tldrgraph.classifier import LayerType  # noqa: E402
+from tldrgraph.flow_engine import FlowEngine  # noqa: E402
+from tldrgraph.vector_store import LocalVectorStore  # noqa: E402
 
 
 L1 = LayerType.LAYER_1_UI.value
@@ -132,7 +132,7 @@ def flow_graph():
 
 @pytest.fixture()
 def engine(flow_graph, tmp_path):
-    store = LocalVectorStore(str(tmp_path / ".codechakra" / "vector_index.json"))
+    store = LocalVectorStore(str(tmp_path / ".tldrgraph" / "vector_index.json"))
     store.add_documents([dict(data) for _, data in flow_graph.nodes(data=True)])
     return FlowEngine(flow_graph, store, root_dir=str(tmp_path))
 
@@ -357,7 +357,7 @@ def test_query_flow_keeps_the_keys_cli_consumes(engine):
 # --------------------------------------------------------------------------- #
 
 def test_bridge_relations_come_from_the_loader_and_tolerate_new_names():
-    from codechakra.graph_loader import BRIDGE_RELATIONS as LOADER_BRIDGES
+    from tldrgraph.graph_loader import BRIDGE_RELATIONS as LOADER_BRIDGES
 
     assert set(LOADER_BRIDGES) <= fe.BRIDGE_RELATIONS, "loader bridges must be honoured"
     # The deterministic relations another producer is adding in parallel are
@@ -367,7 +367,7 @@ def test_bridge_relations_come_from_the_loader_and_tolerate_new_names():
 
 def test_deterministic_bridge_relation_gets_priority(flow_graph, tmp_path):
     flow_graph.add_edge(UI_SYMBOL, ORPHAN, relation="http_route_link", confidence=1.0)
-    store = LocalVectorStore(str(tmp_path / ".codechakra" / "vector_index.json"))
+    store = LocalVectorStore(str(tmp_path / ".tldrgraph" / "vector_index.json"))
     store.add_documents([dict(d) for _, d in flow_graph.nodes(data=True)])
     eng = FlowEngine(flow_graph, store, root_dir=str(tmp_path))
 
@@ -398,7 +398,7 @@ def test_export_flows_yaml_round_trips(engine, tmp_path):
     import yaml
 
     flows = engine.query_flow("DeskView", top_k=2)
-    out = engine.export_flows_yaml(flows, filename=".codechakra/flows.yaml")
+    out = engine.export_flows_yaml(flows, filename=".tldrgraph/flows.yaml")
     assert os.path.exists(out)
     loaded = yaml.safe_load(Path(out).read_text(encoding="utf-8"))
     assert len(loaded["flows"]) == len(flows)

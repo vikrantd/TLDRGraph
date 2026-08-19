@@ -1,9 +1,9 @@
 """
-Hermetic fixtures for the CodeChakra regression suite.
+Hermetic fixtures for the TLDRGraph regression suite.
 
 Everything the tests touch lives under pytest's ``tmp_path``. Nothing here reads
 the real repository, the real ``graphify-out/`` directory, or the real
-``.codechakra/`` state, and nothing makes a network call.
+``.tldrgraph/`` state, and nothing makes a network call.
 """
 
 import hashlib
@@ -19,10 +19,10 @@ import pytest
 # Import hygiene
 #
 # The distribution is installed editable from `<repo>/codechakra`, but when
-# pytest is launched from the repo root the *outer* `codechakra/` directory
+# pytest is launched from the repo root the *outer* `tldrgraph/` directory
 # (which has no __init__.py) shadows the real package as a namespace package,
-# and `codechakra.__version__` silently disappears. Put the real package parent
-# first on sys.path so `import codechakra` always resolves to the source tree
+# and `tldrgraph.__version__` silently disappears. Put the real package parent
+# first on sys.path so `import tldrgraph` always resolves to the source tree
 # under test regardless of cwd.
 # ---------------------------------------------------------------------------
 _PKG_PARENT = str(Path(__file__).resolve().parent.parent)
@@ -30,8 +30,8 @@ if _PKG_PARENT in sys.path:
     sys.path.remove(_PKG_PARENT)
 sys.path.insert(0, _PKG_PARENT)
 
-from codechakra.classifier import LayerType  # noqa: E402
-from codechakra.graph_loader import GraphLoader  # noqa: E402
+from tldrgraph.classifier import LayerType  # noqa: E402
+from tldrgraph.graph_loader import GraphLoader  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -208,20 +208,20 @@ class MiniRepo:
         return self.graphify_dir / "manifest.json"
 
     @property
-    def codechakra_dir(self) -> Path:
-        return self.root / ".codechakra"
+    def tldrgraph_dir(self) -> Path:
+        return self.root / ".tldrgraph"
 
     @property
     def snapshot_path(self) -> Path:
-        return self.codechakra_dir / "graph.json"
+        return self.tldrgraph_dir / "graph.json"
 
     @property
     def index_path(self) -> Path:
-        return self.codechakra_dir / "vector_index.json"
+        return self.tldrgraph_dir / "vector_index.json"
 
     @property
     def db_path(self) -> Path:
-        return self.codechakra_dir / "codechakra.db"
+        return self.tldrgraph_dir / "tldrgraph.db"
 
     def nid(self, key: str) -> str:
         return self.node_ids[key]
@@ -374,7 +374,7 @@ def stub_enricher(monkeypatch):
 
     The callable receives each node dict and returns the ``calls`` list for it.
     """
-    from codechakra.llm_enricher import LLMEnricher
+    from tldrgraph.llm_enricher import LLMEnricher
 
     def _install(calls_for, intent_for=None, fields_for=None):
         def fake_enrich_batch(self, nodes_batch):

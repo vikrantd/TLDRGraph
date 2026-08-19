@@ -8,7 +8,7 @@ made since it was written, and a stale line number must not be trusted blindly.
 
 import textwrap
 
-from codechakra.visualizer.source import (
+from tldrgraph.visualizer.source import (
     SourceIndex,
     language_for,
     parse_line_number,

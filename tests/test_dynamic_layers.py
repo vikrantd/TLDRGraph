@@ -7,12 +7,12 @@ import os
 import pytest
 from click.testing import CliRunner
 
-from codechakra.cli import cli
-from codechakra.classifier import classify_node
-from codechakra.graph_loader import GraphLoader
-from codechakra.layer_config import load_layer_config, save_layer_config
-from codechakra.layers import LayerRegistry, get_registry, set_registry, default_registry
-from codechakra.propose_layers import (
+from tldrgraph.cli import cli
+from tldrgraph.classifier import classify_node
+from tldrgraph.graph_loader import GraphLoader
+from tldrgraph.layer_config import load_layer_config, save_layer_config
+from tldrgraph.layers import LayerRegistry, get_registry, set_registry, default_registry
+from tldrgraph.propose_layers import (
     ARCHETYPE_BACKEND,
     ARCHETYPE_CLI,
     ARCHETYPE_FULLSTACK,
@@ -111,23 +111,23 @@ def test_cli_archetype_classifies_cli_components(tmp_path):
     reg = LayerRegistry.from_records(data["layers"], utility_id=data["utility_id"])
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("codechakra.layers.get_registry", lambda: reg)
-        mp.setattr("codechakra.classifier.get_registry", lambda: reg)
+        mp.setattr("tldrgraph.layers.get_registry", lambda: reg)
+        mp.setattr("tldrgraph.classifier.get_registry", lambda: reg)
 
         # CLI command
-        layer_cli = classify_node("n1", {"file": "codechakra/cli.py", "label": "scan"})
+        layer_cli = classify_node("n1", {"file": "tldrgraph/cli.py", "label": "scan"})
         assert layer_cli.id == "cli"
 
         # Core engine
-        layer_eng = classify_node("n2", {"file": "codechakra/flow_engine.py", "label": "query_flow"})
+        layer_eng = classify_node("n2", {"file": "tldrgraph/flow_engine.py", "label": "query_flow"})
         assert layer_eng.id == "engine"
 
         # Storage
-        layer_store = classify_node("n3", {"file": "codechakra/vector_store.py", "label": "LocalVectorStore"})
+        layer_store = classify_node("n3", {"file": "tldrgraph/vector_store.py", "label": "LocalVectorStore"})
         assert layer_store.id == "storage"
 
         # Agent / Visualizer
-        layer_int = classify_node("n4", {"file": "codechakra/visualizer.py", "label": "generate_html"})
+        layer_int = classify_node("n4", {"file": "tldrgraph/visualizer.py", "label": "generate_html"})
         assert layer_int.id == "integrations"
 
         # Fallback / Utility
@@ -226,7 +226,7 @@ def test_cli_propose_layers_auto_command(tmp_path):
     assert res.exit_code == 0
     assert "Automatically configured" in res.output
 
-    cfg_file = tmp_path / ".codechakra" / "layers.config.yaml"
+    cfg_file = tmp_path / ".tldrgraph" / "layers.config.yaml"
     assert cfg_file.is_file()
 
 
@@ -253,10 +253,10 @@ def test_cli_scan_initializes_dynamic_layers_automatically(tmp_path):
     assert "Configured" in res.output or "Scanning repository" in res.output
 
     # Verify layers.config.yaml was created with CLI archetype
-    cfg_file = tmp_path / ".codechakra" / "layers.config.yaml"
+    cfg_file = tmp_path / ".tldrgraph" / "layers.config.yaml"
     assert cfg_file.is_file()
 
     # Query command should work with the dynamic layers
     res_layers = runner.invoke(cli, ["layers", "--path", str(tmp_path)])
     assert res_layers.exit_code == 0
-    assert "CodeChakra Multi-Layer Architecture Summary" in res_layers.output
+    assert "TLDRGraph Multi-Layer Architecture Summary" in res_layers.output

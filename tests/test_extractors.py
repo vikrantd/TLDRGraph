@@ -2,8 +2,8 @@
 Deterministic cross-layer seam extraction + the dead-code reachability cascade.
 
 graphify emits AST edges only, so the HTTP boundary and the Prisma schema are
-invisible to it. ``codechakra.extractors`` re-derives both from source text and
-``codechakra.deadcode`` decides what that (still) says about reachability.
+invisible to it. ``tldrgraph.extractors`` re-derives both from source text and
+``tldrgraph.deadcode`` decides what that (still) says about reachability.
 
 Everything here is hermetic: fixtures are local to this module, built in
 ``tmp_path``, and no test reads the real repository.
@@ -14,9 +14,9 @@ import json
 import networkx as nx
 import pytest
 
-from codechakra import extractors as ex
-from codechakra.classifier import LayerType, classify_node
-from codechakra.deadcode import (
+from tldrgraph import extractors as ex
+from tldrgraph.classifier import LayerType, classify_node
+from tldrgraph.deadcode import (
     CANDIDATE_COVERAGE_FLOOR,
     STATUS_CANDIDATE,
     STATUS_ENTRY_POINT,
@@ -27,7 +27,7 @@ from codechakra.deadcode import (
     compute_enrichment_coverage,
     entry_point_reason,
 )
-from codechakra.graph_loader import BRIDGE_RELATIONS, GraphLoader
+from tldrgraph.graph_loader import BRIDGE_RELATIONS, GraphLoader
 
 
 # --------------------------------------------------------------------------- #
@@ -756,7 +756,7 @@ def test_unqueried_model_is_reported_but_not_as_a_candidate_without_coverage(sea
 
 def test_scan_persists_dead_code_fields(seam_loader, seam_repo):
     seam_loader.load_or_extract(enrich_llm=False, rebuild=True)
-    snapshot = json.loads((seam_repo / ".codechakra/graph.json").read_text(encoding="utf-8"))
+    snapshot = json.loads((seam_repo / ".tldrgraph/graph.json").read_text(encoding="utf-8"))
 
     by_id = {n["id"]: n for n in snapshot["nodes"]}
     assert by_id["prisma_model_office"]["dead_code_status"]
@@ -769,7 +769,7 @@ def test_scan_persists_dead_code_fields(seam_loader, seam_repo):
 
 def test_snapshot_still_holds_every_node_and_edge(seam_loader, seam_repo):
     graph = seam_loader.load_or_extract(enrich_llm=False, rebuild=True)
-    snapshot = json.loads((seam_repo / ".codechakra/graph.json").read_text(encoding="utf-8"))
+    snapshot = json.loads((seam_repo / ".tldrgraph/graph.json").read_text(encoding="utf-8"))
 
     assert {n["id"] for n in snapshot["nodes"]} == set(graph.nodes)
     assert {(e["source"], e["target"], e["relation"]) for e in snapshot["edges"]} == {

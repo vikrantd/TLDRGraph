@@ -12,11 +12,11 @@ fails and the coupling is back.
 import networkx as nx
 import pytest
 
-from codechakra.classifier import LayerType, classify_node
-from codechakra.deadcode import compute_enrichment_coverage
-from codechakra.flow_engine import FlowEngine
-from codechakra.graph_loader import GraphLoader
-from codechakra.layers import (
+from tldrgraph.classifier import LayerType, classify_node
+from tldrgraph.deadcode import compute_enrichment_coverage
+from tldrgraph.flow_engine import FlowEngine
+from tldrgraph.graph_loader import GraphLoader
+from tldrgraph.layers import (
     LAYER_API,
     LAYER_ASYNC,
     LAYER_DATA,
@@ -31,7 +31,7 @@ from codechakra.layers import (
     layer_id_of,
     use_registry,
 )
-from codechakra.llm_enricher import LLMEnricher, build_system_prompt
+from tldrgraph.llm_enricher import LLMEnricher, build_system_prompt
 
 
 #: One representative node per layer: (layer id, node id, node data).
@@ -96,7 +96,7 @@ def test_default_registry_ships_the_six_layers_plus_utility():
 
 
 def test_display_names_are_unchanged_from_the_hardcoded_enum():
-    """Persisted .codechakra/ data and 231 existing tests depend on these."""
+    """Persisted .tldrgraph/ data and 231 existing tests depend on these."""
     registry = default_registry()
     assert registry.name(LAYER_UI) == "Layer 1: UI Trigger"
     assert registry.name(LAYER_API) == "Layer 2: API Gateway"
@@ -172,7 +172,7 @@ def test_snapshot_records_layer_id(mini_repo):
 
 
 def test_pre_layer_id_snapshots_still_load(mini_repo):
-    """Old .codechakra/graph.json files carry only the display name."""
+    """Old .tldrgraph/graph.json files carry only the display name."""
     import json
 
     loader = GraphLoader(str(mini_repo.root))
@@ -299,7 +299,7 @@ def test_renaming_does_not_change_the_classification_of_a_real_repo(mini_repo):
 
 def test_utility_bucket_is_the_registry_id_not_the_string(renamed):
     """cli's enrichment queue skips the utility bucket under any display name."""
-    from codechakra import cli as cli_module
+    from tldrgraph import cli as cli_module
 
     assert not cli_module.needs_agent_enrichment(
         {"layer_id": LAYER_UTILITY, "layer": renamed.name(LAYER_UTILITY),
