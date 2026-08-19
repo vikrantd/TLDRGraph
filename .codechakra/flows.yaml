@@ -1,0 +1,746 @@
+flows:
+- match_score: 0.481
+  root_node: scan()
+  root_id: codechakra_cli_scan
+  layer: 'Layer 1: CLI & Commands'
+  file: codechakra/cli.py
+  flow:
+  - id: codechakra_cli_scan
+    label: scan()
+    layer: 'Layer 1: CLI & Commands'
+    file: codechakra/cli.py
+    intent: Scan repository, classify 6 layers, and build local vector index.
+    fields: &id001
+    - embeddings
+    - path
+    - rebuild
+    cost: 0.0
+    via_relation: null
+    via_bridge: false
+    from: null
+  - id: codechakra_graph_loader_graphloader_load_or_extract
+    label: .load_or_extract()
+    layer: 'Layer 2: Core Flow Engine & Logic'
+    file: codechakra/graph_loader.py
+    intent: Core module .load_or_extract in codechakra/graph_loader.py
+    fields: &id002 []
+    cost: 2.0
+    via_relation: method
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader
+  - id: codechakra_hierarchy_build_multilayer_hierarchy
+    label: build_multilayer_hierarchy()
+    layer: 'Layer 2: Core Flow Engine & Logic'
+    file: codechakra/hierarchy.py
+    intent: Scans the repository and builds the 3-tier compound graph described above.
+    fields: &id003
+    - root_dir
+    cost: 2.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_visualizer_generate_visualizer_html
+  - id: codechakra_graph_loader_graphloader
+    label: GraphLoader
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Graph Loader and Multi-Layer Builder for CodeChakra. Ingests graph.json
+      or filesystem AST, runs layer classification and hash gating.
+    fields: &id004
+    - embeddings
+    - root_dir
+    cost: 1.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: codechakra_visualizer_build_layers_config
+    label: build_layers_config()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/visualizer.py
+    intent: Generates dynamic column and styling configuration from the active layer
+      registry.
+    fields: &id005 []
+    cost: 2.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_visualizer_generate_visualizer_html
+  - id: codechakra_layer_config_load_layer_config
+    label: load_layer_config()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/layer_config.py
+    intent: Loads the layer configuration from .codechakra/layers.config.yaml (or
+      .json).
+    fields: &id006
+    - root_dir
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_reset_layer_buckets
+    label: ._reset_layer_buckets()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._reset_layer_buckets in codechakra/graph_loader.py
+    fields: &id007 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_placeholder_summary
+    label: placeholder_summary()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: The generated summary used before any enrichment has happened.
+    fields: &id008
+    - file_path
+    - label
+    - layer
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_node_signature
+    label: .node_signature()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module .node_signature in codechakra/graph_loader.py
+    fields: &id009 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_is_placeholder_summary
+    label: ._is_placeholder_summary()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._is_placeholder_summary in codechakra/graph_loader.py
+    fields: &id010 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_layers_get_registry
+    label: get_registry()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/layers.py
+    intent: The registry every module reads. Resolved per call, never cached.
+    fields: &id011 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_scan_devops_files
+    label: ._scan_devops_files()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._scan_devops_files in codechakra/graph_loader.py
+    fields: &id012 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_register_prisma_model_nodes
+    label: ._register_prisma_model_nodes()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._register_prisma_model_nodes in codechakra/graph_loader.py
+    fields: &id013 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_register_endpoint_nodes
+    label: ._register_endpoint_nodes()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._register_endpoint_nodes in codechakra/graph_loader.py
+    fields: &id014 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_apply_deterministic_edges
+    label: ._apply_deterministic_edges()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._apply_deterministic_edges in codechakra/graph_loader.py
+    fields: &id015 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_apply_display_labels
+    label: ._apply_display_labels()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._apply_display_labels in codechakra/graph_loader.py
+    fields: &id016 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_carry_forward_snapshot
+    label: ._carry_forward_snapshot()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._carry_forward_snapshot in codechakra/graph_loader.py
+    fields: &id017 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_run_llm_enrichment
+    label: ._run_llm_enrichment()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._run_llm_enrichment in codechakra/graph_loader.py
+    fields: &id018 []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_save_graph
+    label: .save_graph()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module .save_graph in codechakra/graph_loader.py
+    fields: []
+    cost: 3.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_visualizer_generate_visualizer_html
+    label: generate_visualizer_html()
+    layer: 'Layer 4: Agent Loop & Visualizer'
+    file: codechakra/visualizer.py
+    intent: Builds the 3-tier multilayer hierarchy and writes the self-contained HTML
+      visualizer.
+    fields: &id019
+    - root_dir
+    cost: 1.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: codechakra_llm_enricher_llmenricher
+    label: LLMEnricher
+    layer: 'Layer 4: Agent Loop & Visualizer'
+    file: codechakra/llm_enricher.py
+    intent: Core module symbol (LLMEnricher) at codechakra/llm_enricher.py.
+    fields: &id020 []
+    cost: 2.0
+    via_relation: uses
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader
+  - id: command
+    label: command
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: command located at '
+    fields: &id021 []
+    cost: 1.0
+    via_relation: references
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: argument
+    label: argument
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: argument located at '
+    fields: &id022 []
+    cost: 1.0
+    via_relation: references
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: option
+    label: option
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: option located at '
+    fields: &id023 []
+    cost: 1.0
+    via_relation: references
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: embeddings_option
+    label: embeddings_option
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: embeddings_option located at '
+    fields: &id024 []
+    cost: 1.0
+    via_relation: references
+    via_bridge: false
+    from: codechakra_cli_scan
+  layers:
+  - 'Layer 1: CLI & Commands'
+  - 'Layer 2: Core Flow Engine & Logic'
+  - 'Layer 3: Graph Loader, Storage & Index'
+  - 'Layer 4: Agent Loop & Visualizer'
+  - General / Utility
+- match_score: 0.436
+  root_node: Scan repository, classify 6 layers, and build local vector index.
+  root_id: codechakra_cli_rationale_230
+  layer: 'Layer 1: CLI & Commands'
+  file: codechakra/cli.py
+  flow:
+  - id: codechakra_cli_rationale_230
+    label: Scan repository, classify 6 layers, and build local vector index.
+    layer: 'Layer 1: CLI & Commands'
+    file: codechakra/cli.py
+    intent: Command-line interface handler for Scan repository, classify 6 layers,
+      and build local vector index.
+    fields: []
+    cost: 0.0
+    via_relation: null
+    via_bridge: false
+    from: null
+  - id: codechakra_cli_scan
+    label: scan()
+    layer: 'Layer 1: CLI & Commands'
+    file: codechakra/cli.py
+    intent: Scan repository, classify 6 layers, and build local vector index.
+    fields: *id001
+    cost: 5.0
+    via_relation: rationale_for
+    via_bridge: false
+    from: codechakra_cli_rationale_230
+  - id: codechakra_graph_loader_graphloader_load_or_extract
+    label: .load_or_extract()
+    layer: 'Layer 2: Core Flow Engine & Logic'
+    file: codechakra/graph_loader.py
+    intent: Core module .load_or_extract in codechakra/graph_loader.py
+    fields: *id002
+    cost: 7.0
+    via_relation: method
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader
+  - id: codechakra_hierarchy_build_multilayer_hierarchy
+    label: build_multilayer_hierarchy()
+    layer: 'Layer 2: Core Flow Engine & Logic'
+    file: codechakra/hierarchy.py
+    intent: Scans the repository and builds the 3-tier compound graph described above.
+    fields: *id003
+    cost: 7.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_visualizer_generate_visualizer_html
+  - id: codechakra_graph_loader_graphloader
+    label: GraphLoader
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Graph Loader and Multi-Layer Builder for CodeChakra. Ingests graph.json
+      or filesystem AST, runs layer classification and hash gating.
+    fields: *id004
+    cost: 6.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: codechakra_visualizer_build_layers_config
+    label: build_layers_config()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/visualizer.py
+    intent: Generates dynamic column and styling configuration from the active layer
+      registry.
+    fields: *id005
+    cost: 7.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_visualizer_generate_visualizer_html
+  - id: codechakra_layer_config_load_layer_config
+    label: load_layer_config()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/layer_config.py
+    intent: Loads the layer configuration from .codechakra/layers.config.yaml (or
+      .json).
+    fields: *id006
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_reset_layer_buckets
+    label: ._reset_layer_buckets()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._reset_layer_buckets in codechakra/graph_loader.py
+    fields: *id007
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_placeholder_summary
+    label: placeholder_summary()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: The generated summary used before any enrichment has happened.
+    fields: *id008
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_node_signature
+    label: .node_signature()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module .node_signature in codechakra/graph_loader.py
+    fields: *id009
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_is_placeholder_summary
+    label: ._is_placeholder_summary()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._is_placeholder_summary in codechakra/graph_loader.py
+    fields: *id010
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_layers_get_registry
+    label: get_registry()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/layers.py
+    intent: The registry every module reads. Resolved per call, never cached.
+    fields: *id011
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_scan_devops_files
+    label: ._scan_devops_files()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._scan_devops_files in codechakra/graph_loader.py
+    fields: *id012
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_register_prisma_model_nodes
+    label: ._register_prisma_model_nodes()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._register_prisma_model_nodes in codechakra/graph_loader.py
+    fields: *id013
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_register_endpoint_nodes
+    label: ._register_endpoint_nodes()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._register_endpoint_nodes in codechakra/graph_loader.py
+    fields: *id014
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_apply_deterministic_edges
+    label: ._apply_deterministic_edges()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._apply_deterministic_edges in codechakra/graph_loader.py
+    fields: *id015
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_apply_display_labels
+    label: ._apply_display_labels()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._apply_display_labels in codechakra/graph_loader.py
+    fields: *id016
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_carry_forward_snapshot
+    label: ._carry_forward_snapshot()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._carry_forward_snapshot in codechakra/graph_loader.py
+    fields: *id017
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_graph_loader_graphloader_run_llm_enrichment
+    label: ._run_llm_enrichment()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: codechakra/graph_loader.py
+    intent: Core module ._run_llm_enrichment in codechakra/graph_loader.py
+    fields: *id018
+    cost: 8.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader_load_or_extract
+  - id: codechakra_visualizer_generate_visualizer_html
+    label: generate_visualizer_html()
+    layer: 'Layer 4: Agent Loop & Visualizer'
+    file: codechakra/visualizer.py
+    intent: Builds the 3-tier multilayer hierarchy and writes the self-contained HTML
+      visualizer.
+    fields: *id019
+    cost: 6.0
+    via_relation: calls
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: codechakra_llm_enricher_llmenricher
+    label: LLMEnricher
+    layer: 'Layer 4: Agent Loop & Visualizer'
+    file: codechakra/llm_enricher.py
+    intent: Core module symbol (LLMEnricher) at codechakra/llm_enricher.py.
+    fields: *id020
+    cost: 7.0
+    via_relation: uses
+    via_bridge: false
+    from: codechakra_graph_loader_graphloader
+  - id: command
+    label: command
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: command located at '
+    fields: *id021
+    cost: 6.0
+    via_relation: references
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: argument
+    label: argument
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: argument located at '
+    fields: *id022
+    cost: 6.0
+    via_relation: references
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: option
+    label: option
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: option located at '
+    fields: *id023
+    cost: 6.0
+    via_relation: references
+    via_bridge: false
+    from: codechakra_cli_scan
+  - id: embeddings_option
+    label: embeddings_option
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: embeddings_option located at '
+    fields: *id024
+    cost: 6.0
+    via_relation: references
+    via_bridge: false
+    from: codechakra_cli_scan
+  layers:
+  - 'Layer 1: CLI & Commands'
+  - 'Layer 2: Core Flow Engine & Logic'
+  - 'Layer 3: Graph Loader, Storage & Index'
+  - 'Layer 4: Agent Loop & Visualizer'
+  - General / Utility
+- match_score: 0.252
+  root_node: Handle onto the synthetic repository materialized in ``tmp_path``.
+  root_id: tests_conftest_rationale_189
+  layer: General / Utility
+  file: tests/conftest.py
+  flow:
+  - id: tests_conftest_minirepo_graphify_dir
+    label: .graphify_dir()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .graphify_dir functionality in tests/conftest.py
+    fields: []
+    cost: 6.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_graph_json
+    label: .graph_json()
+    layer: 'Layer 3: Graph Loader, Storage & Index'
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .graph_json functionality in tests/conftest.py
+    fields: []
+    cost: 6.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_rationale_189
+    label: Handle onto the synthetic repository materialized in ``tmp_path``.
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying Handle onto the synthetic repository materialized
+      in ``tmp_path``. functionality in tests/conftest.py
+    fields: []
+    cost: 0.0
+    via_relation: null
+    via_bridge: false
+    from: null
+  - id: tests_conftest_minirepo
+    label: MiniRepo
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Handle onto the synthetic repository materialized in ``tmp_path``.
+    fields:
+    - root
+    cost: 5.0
+    via_relation: rationale_for
+    via_bridge: false
+    from: tests_conftest_rationale_189
+  - id: tests_conftest_py_path
+    label: Path
+    layer: General / Utility
+    file: ''
+    intent: 'General / Utility: Path located at '
+    fields: []
+    cost: 7.0
+    via_relation: references
+    via_bridge: false
+    from: tests_conftest_minirepo_graphify_dir
+  - id: tests_conftest_minirepo_init
+    label: .__init__()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .__init__ functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_manifest_json
+    label: .manifest_json()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .manifest_json functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_codechakra_dir
+    label: .codechakra_dir()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .codechakra_dir functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_snapshot_path
+    label: .snapshot_path()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .snapshot_path functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_index_path
+    label: .index_path()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .index_path functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_db_path
+    label: .db_path()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .db_path functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_nid
+    label: .nid()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .nid functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_source_file
+    label: .source_file()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .source_file functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_label
+    label: .label()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .label functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_expected_layer
+    label: .expected_layer()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .expected_layer functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_placeholder_summary
+    label: .placeholder_summary()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .placeholder_summary functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_read_manifest
+    label: .read_manifest()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .read_manifest functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_write_manifest
+    label: .write_manifest()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .write_manifest functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  - id: tests_conftest_minirepo_bump_semantic_hash
+    label: .bump_semantic_hash()
+    layer: General / Utility
+    file: tests/conftest.py
+    intent: Hermetic test case verifying .bump_semantic_hash functionality in tests/conftest.py
+    fields: []
+    cost: 10.0
+    via_relation: method
+    via_bridge: false
+    from: tests_conftest_minirepo
+  layers:
+  - 'Layer 3: Graph Loader, Storage & Index'
+  - General / Utility
