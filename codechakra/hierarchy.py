@@ -137,6 +137,25 @@ def is_page_file(file_path: str) -> bool:
     return ext in _PAGE_EXTS and stem.lower() in PAGE_STEMS
 
 
+def is_test_node(file_path: str = "", label: str = "") -> bool:
+    """Returns True if the file path or symbol label represents a test, spec, or test helper."""
+    f = (file_path or "").lower().replace("\\", "/")
+    base = os.path.basename(f)
+    lbl = (label or "").lower()
+
+    if any(part in f for part in ("/tests/", "/test/", "/__tests__/", "/__mocks__/", "/spec/", "/specs/", "/e2e/")) \
+            or f.startswith(("tests/", "test/", "__tests__/", "__mocks__/", "spec/", "specs/", "e2e/")):
+        return True
+
+    if ".test." in base or ".spec." in base or base.startswith("test_") or base.endswith(("_test.py", "_spec.py", "_test.ts", "_spec.ts", "_test.js", "_spec.js")):
+        return True
+
+    if lbl.startswith(("test_", "test ", "describe(", "it(", "test(")):
+        return True
+
+    return False
+
+
 def page_route(file_path: str) -> str:
     """
     The URL route a Next.js page file serves: ``frontend/src/app/applications/
@@ -235,6 +254,7 @@ def build_multilayer_hierarchy(root_dir: str = ".") -> Dict[str, Any]:
                 classified_layer = layer_obj.name
                 classified_layer_id = layer_obj.id
             c_label = label or os.path.basename(file_path)
+            is_test = is_test_node(file_path, c_label)
             containers[cid] = {
                 "id": cid,
                 "label": c_label,
@@ -242,7 +262,10 @@ def build_multilayer_hierarchy(root_dir: str = ".") -> Dict[str, Any]:
                 "layer": classified_layer,
                 "layer_id": classified_layer_id,
                 "tier": TIER_PAGE if is_page_file(file_path) else TIER_MODULE,
+                "is_test": is_test,
                 "intent": "",
+                "input_fields": [],
+                "output_fields": [],
                 "fields": [],
                 "subnodes": [],
                 "parent_containers": [],
@@ -305,7 +328,10 @@ def build_multilayer_hierarchy(root_dir: str = ".") -> Dict[str, Any]:
                 "layer_id": layer_obj.id,
                 "source_location": n.get("source_location"),
                 "intent": n.get("intent") or n.get("summary") or f"{lbl} in {os.path.basename(fpath)}",
-                "fields": n.get("fields", [])
+                "input_fields": n.get("input_fields", []),
+                "output_fields": n.get("output_fields", []),
+                "fields": n.get("fields", []),
+                "is_test": container["is_test"] or is_test_node(fpath, lbl)
             })
 
     # ------------------------------------------------------------------ #
@@ -337,6 +363,7 @@ def build_multilayer_hierarchy(root_dir: str = ".") -> Dict[str, Any]:
             "file": endpoint["file"],
             "layer": api_layer.name,
             "layer_id": api_layer.id,
+            "is_test": container["is_test"],
             "intent": f"REST endpoint handling {endpoint['label']}{handler_note}"
         })
 
@@ -363,8 +390,37 @@ def build_multilayer_hierarchy(root_dir: str = ".") -> Dict[str, Any]:
             "layer": data_layer.name,
             "layer_id": data_layer.id,
             "fields": model_info.get("fields", []) if isinstance(model_info, dict) else [],
+            "is_test": False,
             "intent": f"PostgreSQL database table storing {model_name} records and relations"
         })
+
+    # ------------------------------------------------------------------ #
+    # 5. Connect tier-3 elements to containers
+    # ------------------------------------------------------------------ #
+    # Outgoing calls from AST symbols to endpoints/services
+    for fpath, nlist in ast_by_file.items():
+        src_cid = container_id(fpath)
+        if src_cid not in containers:
+            continue
+        for n in nlist:
+            nid = str(n.get("id"))
+            sub_id = subnode_id(nid)
+            if sub_id not in subnode_map:
+                continue
+
+            for target in (n.get("calls") or []):
+                # Target could be an endpoint or another symbol
+                tgt_cid = None
+                for c in containers.values():
+                    for s in c["subnodes"]:
+                        if s.get("label") == target or s.get("display_label") == target:
+                            tgt_cid = c["id"]
+                            break
+                    if tgt_cid:
+                        break
+                if tgt_cid and tgt_cid != src_cid:
+                    containers[src_cid]["out_containers"].add(tgt_cid)
+                    containers[tgt_cid]["in_containers"].add(src_cid)
 
     # ------------------------------------------------------------------ #
     # 5. Edges
@@ -511,6 +567,7 @@ def build_multilayer_hierarchy(root_dir: str = ".") -> Dict[str, Any]:
             "layer": c["layer"],
             "layer_id": c["layer_id"],
             "tier": c["tier"],
+            "is_test": c.get("is_test", False),
             # Full containment (a DAG). `parent_container` is the deterministic
             # primary for single-parent consumers -- see the module docstring.
             "parent_containers": list(c["parent_containers"]),
@@ -519,7 +576,9 @@ def build_multilayer_hierarchy(root_dir: str = ".") -> Dict[str, Any]:
             "depth": 1 if c["parent_containers"] else 0,
             "shared": c["shared"],
             "intent": c["intent"] or f"Module {c['label']} in {c['layer']}",
-            "fields": c["fields"],
+            "input_fields": c.get("input_fields", []),
+            "output_fields": c.get("output_fields", []),
+            "fields": c.get("fields", []),
             "subnode_count": len(c["subnodes"]),
             "subnodes": c["subnodes"],
             "out_count": len(c["out_containers"]),

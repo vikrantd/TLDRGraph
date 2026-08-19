@@ -1,6 +1,6 @@
 codechakra_version: 0.1.0
 total_nodes: 946
-total_edges: 2547
+total_edges: 2753
 layers:
   'Layer 1: CLI & Commands':
     count: 50

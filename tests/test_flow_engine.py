@@ -384,7 +384,7 @@ def test_trace_path_keeps_the_keys_cli_consumes(engine):
 
 def test_format_node_step_shape_is_unchanged(engine):
     step = engine._format_node_step(API_CTRL)
-    assert set(step) == {"id", "label", "layer", "file", "intent", "fields"}
+    assert set(step) == {"id", "label", "layer_id", "layer", "file", "is_test", "intent", "input_fields", "output_fields", "fields"}
     assert step["label"] == "OrdersController"
 
 

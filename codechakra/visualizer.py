@@ -567,12 +567,14 @@ def _render_html(hierarchy: Dict[str, Any], layers_config: List[Dict[str, Any]])
       <div class="stat-pill">Endpoints: <strong id="stat-endpoints">0</strong></div>
       <div class="stat-pill">Edges: <strong id="stat-edges">0</strong></div>
       <div class="stat-pill">Shared Components: <strong id="stat-shared">0</strong></div>
+      <div class="stat-pill">Tests: <strong id="stat-tests">0</strong></div>
     </div>
     <div class="controls">
       <div class="view-switcher">
         <button class="view-btn active" onclick="switchView('columns')">Columns</button>
         <button class="view-btn" onclick="switchView('spine')">Spine Flow</button>
-        <button class="view-btn" onclick="switchView('shared')">Shared (12)</button>
+        <button class="view-btn" onclick="switchView('shared')">Shared</button>
+        <button id="btn-toggle-tests" class="view-btn" onclick="toggleTests()" title="Toggle visibility of test files and suites">🧪 Tests (All)</button>
       </div>
       <div class="search-box">
         <span class="search-icon">🔍</span>
@@ -592,17 +594,24 @@ def _render_html(hierarchy: Dict[str, Any], layers_config: List[Dict[str, Any]])
 
     <aside id="detail-drawer">
       <div class="drawer-section">
-        <div class="badge" id="drawer-tier-badge">Container</div>
+        <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
+          <div class="badge" id="drawer-tier-badge">Container</div>
+          <div class="badge" id="drawer-test-badge" style="display:none; background:#495057; color:#f8f9fa; border:1px solid #6c757d;">🧪 TEST</div>
+        </div>
         <h3 class="drawer-title" id="drawer-title">Select a node</h3>
         <div class="drawer-file" id="drawer-file">Click on any container or element to inspect</div>
       </div>
       <div class="drawer-section" id="drawer-intent-section">
         <h4>Natural Language Intent</h4>
-        <div class="drawer-intent" id="drawer-intent">No intent recorded</div>
+        <div class="drawer-intent" id="drawer-intent" style="white-space: pre-wrap; line-height: 1.5;">No intent recorded</div>
       </div>
-      <div class="drawer-section" id="drawer-fields-section">
-        <h4>Handled Fields / Attributes</h4>
-        <div id="drawer-fields">(None)</div>
+      <div class="drawer-section" id="drawer-input-fields-section">
+        <h4>Input Parameters / Fields</h4>
+        <div id="drawer-input-fields">(None)</div>
+      </div>
+      <div class="drawer-section" id="drawer-output-fields-section">
+        <h4>Output Returns / Emitted</h4>
+        <div id="drawer-output-fields">(None)</div>
       </div>
       <div class="drawer-section" id="drawer-connections-section">
         <h4>Connected Edges</h4>
@@ -655,18 +664,37 @@ def _render_html(hierarchy: Dict[str, Any], layers_config: List[Dict[str, Any]])
     document.getElementById('stat-edges').innerText = HIERARCHY.stats.edges;
     const sharedCount = HIERARCHY.containers.filter(c => c.shared).length;
     document.getElementById('stat-shared').innerText = sharedCount;
+    const testContainersCount = HIERARCHY.containers.filter(c => c.is_test).length;
+    document.getElementById('stat-tests').innerText = testContainersCount;
+    document.getElementById('btn-toggle-tests').innerText = `🧪 Tests (${{testContainersCount}})`;
+
+    let hideTests = false;
+    function toggleTests() {{
+      hideTests = !hideTests;
+      const btn = document.getElementById('btn-toggle-tests');
+      btn.classList.toggle('active', hideTests);
+      btn.innerText = hideTests ? '🧪 Tests (Hidden)' : `🧪 Tests (${{testContainersCount}})`;
+      renderActiveView();
+    }}
+
+    function renderActiveView() {{
+      if (activeView === 'columns') renderColumns();
+      else if (activeView === 'spine') renderSpineView();
+      else if (activeView === 'shared') renderSharedView();
+    }}
 
     // View switcher
     function switchView(viewName) {{
       activeView = viewName;
       document.querySelectorAll('.view-btn').forEach(btn => {{
-        btn.classList.toggle('active', btn.innerText.toLowerCase().includes(viewName));
+        if (btn.id !== 'btn-toggle-tests') {{
+          btn.classList.toggle('active', btn.innerText.toLowerCase().includes(viewName));
+        }}
       }});
       document.getElementById('view-columns').style.display = viewName === 'columns' ? 'flex' : 'none';
       document.getElementById('view-spine').style.display = viewName === 'spine' ? 'flex' : 'none';
       document.getElementById('view-shared').style.display = viewName === 'shared' ? 'flex' : 'none';
-      if (viewName === 'spine') renderSpineView();
-      if (viewName === 'shared') renderSharedView();
+      renderActiveView();
       clearSvg();
     }}
 
@@ -690,21 +718,25 @@ def _render_html(hierarchy: Dict[str, Any], layers_config: List[Dict[str, Any]])
 
       // Group containers by layer_id
       HIERARCHY.containers.forEach(c => {{
+        if (hideTests && c.is_test) return;
+
         const targetCol = document.getElementById(`col-body-${{c.layer_id}}`);
         if (!targetCol) return;
 
         const card = document.createElement('div');
-        card.className = 'card';
+        card.className = `card ${{c.is_test ? 'test-container' : ''}}`;
         card.id = `card-${{c.id}}`;
         card.onclick = (ev) => {{ ev.stopPropagation(); selectContainer(c.id); }};
 
         const tierBadgeClass = c.tier === 'page' ? 'badge-page' : (c.tier === 'component' ? 'badge-component' : 'badge-module');
         const sharedBadge = c.shared ? `<span class="badge badge-shared">🔗 Shared (${{c.parent_containers.length}})</span>` : '';
+        const testBadge = c.is_test ? `<span class="badge" style="background:#495057; color:#f8f9fa; border:1px solid #6c757d;">🧪 test</span>` : '';
 
         card.innerHTML = `
           <div class="card-header">
             <div class="card-title">${{c.display_label || c.label}}</div>
-            <div style="display:flex; gap:4px;">
+            <div style="display:flex; gap:4px; align-items:center;">
+              ${{testBadge}}
               ${{sharedBadge}}
               <span class="badge ${{tierBadgeClass}}">${{c.tier}}</span>
             </div>
@@ -729,9 +761,11 @@ def _render_html(hierarchy: Dict[str, Any], layers_config: List[Dict[str, Any]])
         if (s.method) {{
           methodPill = `<span class="method-pill method-${{s.method.toLowerCase()}}">${{s.method}}</span>`;
         }}
+        const testSubnodeBadge = s.is_test ? `<span class="badge" style="background:#495057; color:#f8f9fa; font-size:9px; padding:1px 3px;">🧪</span>` : '';
         return `
-          <div class="subnode-item" id="subnode-${{s.id}}" onclick="selectElement('${{s.id}}', event)">
+          <div class="subnode-item ${{s.is_test ? 'test-subnode' : ''}}" id="subnode-${{s.id}}" onclick="selectElement('${{s.id}}', event)">
             ${{methodPill}}
+            ${{testSubnodeBadge}}
             <span class="subnode-label" title="${{s.display_label || s.label}}">${{s.display_label || s.label}}</span>
             <span class="badge" style="font-size: 9px; padding: 1px 4px;">${{s.kind || s.type}}</span>
           </div>
@@ -764,12 +798,19 @@ def _render_html(hierarchy: Dict[str, Any], layers_config: List[Dict[str, Any]])
 
       // Update Inspector Drawer
       document.getElementById('drawer-tier-badge').innerText = c.tier.toUpperCase();
+      document.getElementById('drawer-test-badge').style.display = c.is_test ? 'inline-block' : 'none';
       document.getElementById('drawer-title').innerText = c.display_label || c.label;
       document.getElementById('drawer-file').innerText = c.file;
       document.getElementById('drawer-intent').innerText = c.intent || 'No intent recorded';
-      document.getElementById('drawer-fields').innerHTML = (c.fields && c.fields.length > 0)
-        ? c.fields.map(f => `<span class="field-tag">${{f}}</span>`).join('')
-        : '<em>(No fields handled)</em>';
+      
+      const inFields = (c.input_fields && c.input_fields.length > 0) ? c.input_fields : (c.fields || []);
+      const outFields = c.output_fields || [];
+      document.getElementById('drawer-input-fields').innerHTML = (inFields && inFields.length > 0)
+        ? inFields.map(f => `<span class="field-tag" style="background:#e8f4fd; color:#0d6efd; border-color:#b6d4fe;">${{f}}</span>`).join('')
+        : '<em>(None)</em>';
+      document.getElementById('drawer-output-fields').innerHTML = (outFields && outFields.length > 0)
+        ? outFields.map(f => `<span class="field-tag" style="background:#f3e8fd; color:#6f42c1; border-color:#d8b4fe;">${{f}}</span>`).join('')
+        : '<em>(None)</em>';
 
       // Show connected edges
       const outs = outgoingEdges[id] || [];
@@ -792,12 +833,19 @@ def _render_html(hierarchy: Dict[str, Any], layers_config: List[Dict[str, Any]])
       if (!s) return;
 
       document.getElementById('drawer-tier-badge').innerText = s.kind || s.type;
+      document.getElementById('drawer-test-badge').style.display = s.is_test ? 'inline-block' : 'none';
       document.getElementById('drawer-title').innerText = s.display_label || s.label;
       document.getElementById('drawer-file').innerText = `${{s.file}} ${{s.source_location ? `(${{s.source_location}})` : ''}}`;
       document.getElementById('drawer-intent').innerText = s.intent || 'No intent recorded';
-      document.getElementById('drawer-fields').innerHTML = (s.fields && s.fields.length > 0)
-        ? s.fields.map(f => `<span class="field-tag">${{f}}</span>`).join('')
-        : '<em>(No fields recorded)</em>';
+      
+      const inFields = (s.input_fields && s.input_fields.length > 0) ? s.input_fields : (s.fields || []);
+      const outFields = s.output_fields || [];
+      document.getElementById('drawer-input-fields').innerHTML = (inFields && inFields.length > 0)
+        ? inFields.map(f => `<span class="field-tag" style="background:#e8f4fd; color:#0d6efd; border-color:#b6d4fe;">${{f}}</span>`).join('')
+        : '<em>(None)</em>';
+      document.getElementById('drawer-output-fields').innerHTML = (outFields && outFields.length > 0)
+        ? outFields.map(f => `<span class="field-tag" style="background:#f3e8fd; color:#6f42c1; border-color:#d8b4fe;">${{f}}</span>`).join('')
+        : '<em>(None)</em>';
 
       traceFlow(id);
     }}

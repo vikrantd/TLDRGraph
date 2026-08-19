@@ -26,6 +26,7 @@ from typing import List, Dict, Any, Tuple, Optional, Set
 from tabulate import tabulate
 from .vector_store import LocalVectorStore
 from .layers import get_registry, layer_id_of
+from .hierarchy import is_test_node
 
 # --------------------------------------------------------------------------- #
 # Bridge relations
@@ -436,23 +437,34 @@ class FlowEngine:
                 "match_score": round(score, 3),
                 "root_node": doc["label"],
                 "root_id": node_id,
+                "layer_id": self._layer_id_of(node_id),
                 "layer": doc.get("layer"),
                 "file": doc.get("file"),
                 "flow": steps,
                 "layers": self._layers_of_steps(steps),
+                "layer_ids": [s.get("layer_id") for s in steps if s.get("layer_id")],
             })
 
         return results
 
     def _format_node_step(self, node_id: str) -> Dict[str, Any]:
         node_data = self.graph.nodes.get(node_id, {})
-        fields = node_data.get("fields", [])
+        input_fields = node_data.get("input_fields", [])
+        output_fields = node_data.get("output_fields", [])
+        fields = node_data.get("fields", []) or (list(input_fields) + list(output_fields))
+        is_test = node_data.get("is_test")
+        if is_test is None:
+            is_test = is_test_node(node_data.get("file", ""), node_data.get("label", ""))
         return {
             "id": node_id,
             "label": node_data.get("label", node_id),
+            "layer_id": self._layer_id_of(node_id),
             "layer": node_data.get("layer", "Unknown"),
             "file": node_data.get("file", ""),
+            "is_test": bool(is_test),
             "intent": node_data.get("intent") or node_data.get("summary", ""),
+            "input_fields": input_fields,
+            "output_fields": output_fields,
             "fields": fields
         }
 
@@ -465,13 +477,14 @@ class FlowEngine:
 
     @staticmethod
     def render_markdown_table(steps: List[Dict[str, Any]]) -> str:
-        headers = ["Layer", "Component / Symbol", "Intent & Action", "Fields / Payload", "File Location"]
+        headers = ["Layer", "Component / Symbol", "Intent & Action", "Input Fields", "Output Fields", "File Location"]
         rows = [
             [
                 s.get("layer", ""),
                 s.get("label", s.get("id", "")),
                 s.get("intent", ""),
-                ", ".join(s.get("fields", [])) if s.get("fields") else "-",
+                ", ".join(s.get("input_fields", [])) if s.get("input_fields") else (", ".join(s.get("fields", [])) if s.get("fields") else "-"),
+                ", ".join(s.get("output_fields", [])) if s.get("output_fields") else "-",
                 s.get("file", "")
             ]
             for s in steps

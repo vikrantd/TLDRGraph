@@ -446,10 +446,12 @@ class LocalVectorStore:
     @staticmethod
     def _doc_text(doc: Dict[str, Any]) -> str:
         """Everything that should be searchable for a document, including the
-        LLM/agent supplied intent and fields."""
-        fields = doc.get("fields") or []
-        if isinstance(fields, (list, tuple)):
-            fields = " ".join(str(f) for f in fields)
+        LLM/agent supplied intent, input_fields, and output_fields."""
+        input_fields = doc.get("input_fields") or []
+        output_fields = doc.get("output_fields") or []
+        legacy_fields = doc.get("fields") or []
+        all_fields = list(input_fields) + list(output_fields) + (list(legacy_fields) if not input_fields and not output_fields else [])
+        fields_str = " ".join(str(f) for f in all_fields)
         return " ".join(str(part) for part in (
             doc.get("label", ""),
             doc.get("layer", ""),
@@ -457,7 +459,7 @@ class LocalVectorStore:
             doc.get("content", ""),
             doc.get("summary", ""),
             doc.get("intent", ""),
-            fields,
+            fields_str,
         ) if part)
 
     @staticmethod

@@ -54,8 +54,8 @@ def generate_layers_prose(registry: Optional[LayerRegistry] = None) -> str:
 
 
 _LOOP = """```bash
-codechakra queue-enrichment --limit 50   # writes .codechakra/enrichment_request.json
-# read the request, OPEN THE SOURCE FILES, write .codechakra/enrichment_response.json
+codechakra queue-enrichment --limit 50   # writes .codechakra/enrichment_request.yaml
+# read the request, OPEN THE SOURCE FILES, write .codechakra/enrichment_response.yaml
 codechakra apply-enrichment              # merges intents + bridge edges into the graph
 codechakra queue-enrichment --limit 50   # repeat; the queue advances by itself
 ```"""
@@ -65,21 +65,26 @@ _RULES_SHORT = """- **Read the source file before writing an intent.** You have 
   than none, because it poisons semantic search with confident-sounding noise.
 - **Never invent `fields` or `calls`. Omit what you cannot verify in the code.** An empty
   list is a correct answer; a wrong `calls` entry becomes a real, wrong edge in the graph.
-- **`calls` are resolved by TF-IDF with a 0.35 score floor.** Exact symbol names
-  (`ApplicationsService`), file names (`calc.ts`) and table names (`pension_cases`)
-  resolve; vague prose ("the database") scores below the floor and is dropped silently.
+- **`calls` are resolved with 2-tier precision.** Exact symbol names
+  (`ApplicationsService`), file names (`calc.ts`), IDs, and table names (`pension_cases`)
+  match with 100% confidence; fallback vector search handles related terms with a 0.35 score floor.
 - **Write the response to a different file than the request.** The request is regenerated
   on every run."""
 
-_RESPONSE_SCHEMA = """```json
-[
-  {
-    "id": "<node id copied verbatim from the request>",
-    "intent": "1-2 sentences of plain English: what this symbol does and why.",
-    "fields": ["caseId", "remarks"],
-    "calls": ["ApplicationsService", "pension_cases"]
-  }
-]
+_RESPONSE_SCHEMA = """```yaml
+- id: "<node id copied verbatim from the request>"
+  intent: |
+    ### Summary / Role in Markdown
+    What this symbol does, why it exists, and execution logic.
+  input_fields:
+    - caseId
+    - remarks
+  output_fields:
+    - status
+    - disposition
+  calls:
+    - ApplicationsService
+    - pension_cases
 ```"""
 
 _DEAD_CODE_NOTE = """`codechakra dead-code` lists **review candidates, not confirmed dead code**.

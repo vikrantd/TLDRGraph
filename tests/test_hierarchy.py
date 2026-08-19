@@ -552,3 +552,13 @@ def test_layer_ids_are_carried_alongside_display_names(hierarchy):
 
     endpoint = next(s for s in all_subnodes(hierarchy) if s["kind"] == "API Endpoint")
     assert endpoint["layer_id"] == LAYER_API
+
+
+def test_is_test_identifier_present_on_containers_and_subnodes(hierarchy):
+    """Every container and subnode carries is_test boolean identifier."""
+    for c in hierarchy["containers"]:
+        assert "is_test" in c
+        assert isinstance(c["is_test"], bool)
+        for s in c.get("subnodes", []):
+            assert "is_test" in s
+            assert isinstance(s["is_test"], bool)

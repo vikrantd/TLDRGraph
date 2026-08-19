@@ -25,6 +25,7 @@ from .hash_gate import HashGate
 from .labels import build_display_labels
 from .vector_store import BACKEND_TFIDF, SCORE_FLOORS, LocalVectorStore
 from .llm_enricher import LLMEnricher
+from .hierarchy import is_test_node
 
 #: Relations that represent LLM/agent inferred bridges between layers. These are the
 #: only edges that are NOT re-derivable from graphify, so they are carried forward
@@ -72,6 +73,141 @@ SNAPSHOT_FILENAME = "graph.json"
 def placeholder_summary(layer: str, label: str, file_path: str) -> str:
     """The generated summary used before any enrichment has happened."""
     return f"{layer}: {label} located at {file_path}"
+
+
+def resolve_call_target(
+    graph: nx.DiGraph,
+    vector_store: LocalVectorStore,
+    call_target: Any,
+    source_id: str,
+    floor: Optional[float] = None,
+) -> Tuple[Optional[str], float]:
+    """
+    High-precision multi-tier resolution of downstream call targets specified by agent/LLM:
+    1. Structured Target:
+       - dict with {"id": ...} or {"target_id": ...} -> exact ID match.
+       - dict with {"file": ..., "label": ...} -> matched by (file, label).
+    2. Exact node_id in graph.
+    3. Qualified string ("file_path:symbol" or "file_path#symbol"):
+       - Matches symbol within the specified file path.
+    4. Exact source file match:
+       - "path/to/file.ts" matches file/module node.
+    5. Exact symbol label match with Smart Disambiguation:
+       - If multiple candidates share the same label (e.g. active service vs dead code):
+         a. Prioritize active/live nodes over dead_code_status == "candidate".
+         b. Prioritize exact case over case-insensitive match.
+         c. Prioritize nodes in the same directory/module as source_id.
+    6. Vector search fallback with calibrated score floor.
+
+    Returns (target_node_id, confidence) or (None, 0.0).
+    """
+    if call_target is None:
+        return None, 0.0
+
+    if floor is None:
+        floor = bridge_score_floor(vector_store)
+
+    target_id: Optional[str] = None
+    target_file: Optional[str] = None
+    target_symbol: Optional[str] = None
+
+    # 1. Handle structured dict target
+    if isinstance(call_target, dict):
+        target_id = call_target.get("id") or call_target.get("target_id")
+        target_file = call_target.get("file") or call_target.get("path")
+        target_symbol = call_target.get("label") or call_target.get("symbol")
+        if target_id and graph.has_node(str(target_id)) and str(target_id) != source_id:
+            return str(target_id), 1.0
+        if not target_symbol and not target_file:
+            return None, 0.0
+    else:
+        target_str = str(call_target).strip()
+        if not target_str:
+            return None, 0.0
+
+        # 2. Check exact node_id in graph
+        if graph.has_node(target_str) and target_str != source_id:
+            return target_str, 1.0
+
+        # 3. Check qualified string: "path/to/file.ts:symbol" or "path/to/file.ts#symbol"
+        if ":" in target_str and not target_str.startswith("http"):
+            parts = target_str.split(":", 1)
+            target_file, target_symbol = parts[0].strip(), parts[1].strip()
+        elif "#" in target_str:
+            parts = target_str.split("#", 1)
+            target_file, target_symbol = parts[0].strip(), parts[1].strip()
+        else:
+            target_symbol = target_str
+
+    source_file = ""
+    if graph.has_node(source_id):
+        source_file = str(graph.nodes[source_id].get("file") or graph.nodes[source_id].get("source_file") or "")
+    source_dir = os.path.dirname(source_file)
+
+    # 4. If both file and symbol are specified (or parsed from qualified string)
+    if target_file and target_symbol:
+        target_file_norm = target_file.replace("\\", "/").lower()
+        target_sym_lower = target_symbol.lower()
+        for nid, data in graph.nodes(data=True):
+            if nid == source_id:
+                continue
+            file_path = str(data.get("file") or data.get("source_file") or "").replace("\\", "/").lower()
+            label = str(data.get("label") or "")
+            if (file_path == target_file_norm or file_path.endswith("/" + target_file_norm) or os.path.basename(file_path) == target_file_norm):
+                if label == target_symbol or label.lower() == target_sym_lower:
+                    return nid, 1.0
+
+    # 5. If target matches a file path directly
+    if target_file and not target_symbol:
+        target_file_norm = target_file.replace("\\", "/").lower()
+        for nid, data in graph.nodes(data=True):
+            if nid == source_id:
+                continue
+            file_path = str(data.get("file") or data.get("source_file") or "").replace("\\", "/").lower()
+            if file_path == target_file_norm or file_path.endswith("/" + target_file_norm) or os.path.basename(file_path) == target_file_norm:
+                return nid, 1.0
+
+    # 6. Exact label match with Smart Disambiguation
+    if target_symbol:
+        target_sym_lower = target_symbol.lower()
+        candidates: List[Tuple[str, Dict[str, Any]]] = []
+        for nid, data in graph.nodes(data=True):
+            if nid == source_id:
+                continue
+            label = str(data.get("label") or "")
+            file_path = str(data.get("file") or data.get("source_file") or "")
+            file_base = os.path.basename(file_path)
+            if label == target_symbol or label.lower() == target_sym_lower or file_path == target_symbol or file_base == target_symbol:
+                candidates.append((nid, data))
+
+        if len(candidates) == 1:
+            return candidates[0][0], 1.0
+
+        if len(candidates) > 1:
+            # Score candidates to disambiguate active components from dead code
+            def _rank_candidate(cand: Tuple[str, Dict[str, Any]]) -> Tuple[int, int, int]:
+                nid, data = cand
+                label = str(data.get("label") or "")
+                c_file = str(data.get("file") or data.get("source_file") or "")
+                c_dir = os.path.dirname(c_file)
+                case_score = 2 if label == target_symbol else 1
+                dead_code_score = 0 if data.get("dead_code_status") == "candidate" else 2
+                dir_score = 2 if (source_dir and c_dir == source_dir) else 0
+                return (dead_code_score, case_score, dir_score)
+
+            candidates.sort(key=_rank_candidate, reverse=True)
+            return candidates[0][0], 1.0
+
+    # 7. Vector search fallback
+    search_query = target_symbol or str(call_target)
+    matches = vector_store.search(search_query, top_k=1)
+    if matches:
+        tgt_doc, score = matches[0]
+        tgt_id = tgt_doc.get("id")
+        if tgt_id and tgt_id != source_id and score >= floor:
+            return tgt_id, float(score)
+
+    return None, 0.0
 
 
 class GraphLoader:
@@ -212,12 +348,15 @@ class GraphLoader:
                 "community": data.get("community"),
                 "degree": data.get("degree", 0),
                 "summary": data.get("summary", ""),
-                "fields": data.get("fields", []),
+                "input_fields": data.get("input_fields", []),
+                "output_fields": data.get("output_fields", []),
+                "fields": data.get("fields", []) or (list(data.get("input_fields", [])) + list(data.get("output_fields", []))),
                 "intent": data.get("intent", ""),
                 "enrichment_source": data.get("enrichment_source", ""),
                 "source_location": data.get("source_location"),
                 "dead_code_status": data.get("dead_code_status", ""),
                 "dead_code_reason": data.get("dead_code_reason", ""),
+                "is_test": bool(data.get("is_test", is_test_node(data.get("file", ""), data.get("label", "")))),
                 "signature": self.node_signature(data),
             })
 
@@ -329,10 +468,28 @@ class GraphLoader:
                 current["enrichment_source"] = old.get("enrichment_source") or ""
                 touched = True
 
+            input_fields = old.get("input_fields") or []
+            if input_fields:
+                current["input_fields"] = input_fields
+                touched = True
+
+            output_fields = old.get("output_fields") or []
+            if output_fields:
+                current["output_fields"] = output_fields
+                touched = True
+
             fields = old.get("fields") or []
             if fields:
                 current["fields"] = fields
                 touched = True
+            elif input_fields or output_fields:
+                current["fields"] = list(input_fields) + list(output_fields)
+                touched = True
+
+            if "is_test" in old:
+                current["is_test"] = old["is_test"]
+            else:
+                current["is_test"] = is_test_node(current.get("file", ""), current.get("label", ""))
 
             summary = old.get("summary") or ""
             if summary and not self._is_placeholder_summary(summary, old) \
@@ -418,6 +575,9 @@ class GraphLoader:
                     "degree": node.get("degree", 0),
                     "source_location": node.get("source_location"),
                     "summary": placeholder_summary(layer, label, file_path),
+                    "is_test": is_test_node(file_path, label),
+                    "input_fields": [],
+                    "output_fields": [],
                     "fields": [],
                     "intent": "",
                     "enrichment_source": ""
@@ -446,7 +606,15 @@ class GraphLoader:
                     if live_attrs["intent"]:
                         live_attrs["enrichment_source"] = "cache"
                     try:
-                        live_attrs["fields"] = json.loads(cached.get("fields_json") or "[]")
+                        raw_fields = json.loads(cached.get("fields_json") or "[]")
+                        if isinstance(raw_fields, dict):
+                            live_attrs["input_fields"] = raw_fields.get("input_fields", [])
+                            live_attrs["output_fields"] = raw_fields.get("output_fields", [])
+                            live_attrs["fields"] = raw_fields.get("fields", []) or (list(live_attrs["input_fields"]) + list(live_attrs["output_fields"]))
+                        elif isinstance(raw_fields, list):
+                            live_attrs["input_fields"] = raw_fields
+                            live_attrs["output_fields"] = []
+                            live_attrs["fields"] = raw_fields
                     except Exception:
                         pass
                 elif enrich_llm and not get_registry().is_utility(layer_id):
@@ -638,6 +806,7 @@ class GraphLoader:
                 "degree": 0,
                 "source_location": f"L{endpoint['line']}" if endpoint.get("line") else None,
                 "summary": placeholder_summary(api_layer.name, label, file_path),
+                "is_test": False,
                 "fields": [],
                 "intent": "",
                 "enrichment_source": "",
@@ -765,28 +934,39 @@ class GraphLoader:
                     continue
 
                 intent = item.get("intent", "")
-                fields = item.get("fields", [])
-                calls = item.get("calls", [])
+                input_fields = item.get("input_fields", []) or []
+                output_fields = item.get("output_fields", []) or []
+                legacy_fields = item.get("fields", []) or []
+                calls = item.get("calls", []) or []
 
                 node_data = self.graph.nodes[nid]
                 if intent:
                     node_data["intent"] = intent
-                    node_data["summary"] = f"{node_data['layer']}: {node_data['label']} - {intent}"
-                    # Provenance matters downstream: the offline template
-                    # heuristic tags itself "heuristic" and must not count as
-                    # genuine enrichment when dead-code coverage is computed.
+                    first_line = intent.strip().split("\n")[0].lstrip("#- *").strip()
+                    node_data["summary"] = f"{node_data['layer']}: {node_data['label']} - {first_line or intent}"
                     node_data["enrichment_source"] = item.get("source") or "llm"
-                if fields:
-                    node_data["fields"] = fields
+                if input_fields or output_fields:
+                    node_data["input_fields"] = input_fields
+                    node_data["output_fields"] = output_fields
+                    node_data["fields"] = list(input_fields) + list(output_fields)
+                elif legacy_fields:
+                    node_data["input_fields"] = legacy_fields
+                    node_data["output_fields"] = []
+                    node_data["fields"] = legacy_fields
 
                 # Update HashGate cache
+                fields_dict = {
+                    "input_fields": node_data.get("input_fields", []),
+                    "output_fields": node_data.get("output_fields", []),
+                    "fields": node_data.get("fields", [])
+                }
                 self.hash_gate.update_node(
                     node_id=nid,
                     file_path=node_data.get("file", ""),
                     content=self.node_signature(node_data),
                     layer=node_data.get("layer", ""),
                     summary=node_data.get("summary", ""),
-                    fields_json=json.dumps(node_data.get("fields", [])),
+                    fields_json=json.dumps(fields_dict),
                     intent=node_data.get("intent", "")
                 )
 

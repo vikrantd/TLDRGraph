@@ -18,56 +18,52 @@ and a path (`snippet` is never populated), so it guesses. You do not have to gue
 ## The loop
 
 ```bash
-codechakra queue-enrichment --limit 50   # 1. writes .codechakra/enrichment_request.json
+codechakra queue-enrichment --limit 50   # 1. writes .codechakra/enrichment_request.yaml
 #                                          2. you read it, read the SOURCE, and write
-#                                             .codechakra/enrichment_response.json
+#                                             .codechakra/enrichment_response.yaml
 codechakra apply-enrichment              # 3. merges into the graph, cache and index
 codechakra queue-enrichment --limit 50   # 4. repeat -- the queue advances automatically
 ```
 
 Request and response are **separate files**. Never write your answer back into
-`enrichment_request.json`; it is regenerated on every run and your work would be lost.
+`enrichment_request.yaml`; it is regenerated on every run and your work would be lost.
 
 | File | Written by | Read by |
 | --- | --- | --- |
-| `.codechakra/enrichment_request.json` | `queue-enrichment` | you |
-| `.codechakra/enrichment_response.json` | **you** | `apply-enrichment` |
+| `.codechakra/enrichment_request.yaml` (or `enrichment_request.json`) | `queue-enrichment` | you |
+| `.codechakra/enrichment_response.yaml` (or `enrichment_response.json`) | **you** | `apply-enrichment` |
 | `.codechakra/enrichment_cursor.json` | both commands | both commands |
 | `.codechakra/pending_enrichment.json` | *(legacy)* | `apply-enrichment`, only if no response file exists |
 
 ---
 
-## Request schema (`enrichment_request.json`)
+## Request schema (`enrichment_request.yaml`)
 
-```jsonc
-{
-  "schema": "codechakra/enrichment-request@1",
-  "generated_at": "2026-08-19T00:00:00+00:00",
-  "response_file": ".codechakra/enrichment_response.json",
-  "contract": ".codechakra/AGENT_CONTRACT.md",
-  "progress": {
-    "total_candidates": 1873,   // un-enriched, non-utility nodes
-    "already_enriched": 12,     // nodes that already carry an intent
-    "queued_now": 50,           // entries in "nodes" below
-    "remaining_after": 1823     // still waiting after this batch is applied
-  },
-  "nodes": [
-    {
-      "id": "backend_src_applications_applications_controller_applicationscontroller",
-      "label": "ApplicationsController",
-      "layer": "Layer 2: API Gateway",
-      "file": "backend/src/applications/applications.controller.ts",
-      "source_location": "L31",
-      "degree": 41,               // in + out edges in the AST graph
-      "cross_layer_degree": 17,   // of those, how many cross a layer boundary
-      "rank": 1,                  // 1 = highest priority in this batch
-      "existing_intent_source": "heuristic"  // "" when the node has no intent at all
-    }
-  ]
-}
+```yaml
+schema: codechakra/enrichment-request@1
+generated_at: "2026-08-19T00:00:00+00:00"
+response_file: .codechakra/enrichment_response.yaml
+contract: .codechakra/AGENT_CONTRACT.md
+progress:
+  total_candidates: 1873   # un-enriched, non-utility nodes
+  already_enriched: 12     # nodes that already carry an intent
+  queued_now: 50           # entries in "nodes" below
+  remaining_after: 1823     # still waiting after this batch is applied
+nodes:
+  - id: backend_src_applications_applications_controller_applicationscontroller
+    label: ApplicationsController
+    layer_id: api
+    layer: "Layer 2: API Gateway"
+    file: backend/src/applications/applications.controller.ts
+    source_location: L31
+    degree: 41             # in + out edges in the AST graph
+    cross_layer_degree: 17 # of those, how many cross a layer boundary
+    rank: 1                # 1 = highest priority in this batch
+    existing_intent_source: heuristic  # "" when the node has no intent at all
 ```
 
 `file` is repo-relative. `source_location` is graphify's line hint and may be `null`.
+`layer_id` is the stable machine key (e.g. `cli`, `engine`, `storage`, `api`, `ui`).
 
 `existing_intent_source` is `"heuristic"` when the node already carries an intent written
 by the offline template enricher. That text was generated from the label and layer alone
@@ -76,17 +72,39 @@ should overwrite it. Applied answers are stamped `"agent"` and are never re-queu
 
 ---
 
-## Response schema (`enrichment_response.json`)
+## Response schema (`enrichment_response.yaml` or `enrichment_response.json`)
 
-A **JSON array** of objects. Nothing else — no wrapper prose, no markdown fence, no
-trailing commentary.
+A **YAML list** (preferred) or **JSON array** of objects:
 
+```yaml
+- id: backend_src_applications_applications_controller_applicationscontroller
+  intent: |
+    ### Pension Application Lifecycle Gateway
+    REST gateway for the pension application lifecycle. Authorizes DEO/AAO/AO/DAG roles,
+    dispatches cases to ApplicationsService and records status transitions.
+  input_fields:
+    - caseId
+    - transitionPayload
+    - remarks
+    - sanctionOrderNo
+  output_fields:
+    - applicationStatus
+    - disposition
+  calls:
+    - ApplicationsService
+    - JwtAuthGuard
+    - RolesGuard
+    - pension_cases
+```
+
+Equivalent JSON format (also accepted from `.codechakra/enrichment_response.json` or `.codechakra/pending_enrichment.json`):
 ```json
 [
   {
     "id": "backend_src_applications_applications_controller_applicationscontroller",
-    "intent": "REST gateway for the pension application lifecycle. Authorizes DEO/AAO/AO/DAG roles, dispatches cases to ApplicationsService and records status transitions.",
-    "fields": ["caseId", "transitionPayload", "remarks", "sanctionOrderNo", "disposition"],
+    "intent": "### Pension Application Lifecycle Gateway\nREST gateway for the pension application lifecycle.",
+    "input_fields": ["caseId", "transitionPayload", "remarks", "sanctionOrderNo"],
+    "output_fields": ["applicationStatus", "disposition"],
     "calls": ["ApplicationsService", "JwtAuthGuard", "RolesGuard", "pension_cases"]
   }
 ]
@@ -95,16 +113,15 @@ trailing commentary.
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `id` | string, **required** | The node id, copied **verbatim** from the request. An id that is not in the graph is skipped silently. |
-| `intent` | string | 1–2 sentences of plain English: what this symbol does and why it exists. This is the text semantic search matches against, so use the domain vocabulary a person would actually type. |
-| `fields` | array of strings | The form fields / API params / DB columns this symbol actually handles. |
-| `calls` | array of strings | The downstream APIs, services, DB tables or modules this symbol reaches. Each entry becomes a candidate cross-layer bridge edge. |
+| `intent` | string (Markdown) | Markdown formatted explanation: what this symbol does, its role, and why it exists. AI decides how much depth is needed. This is the text semantic search matches against. |
+| `input_fields` | array of strings | Input parameters, arguments, request body payload attributes, query filters. |
+| `output_fields` | array of strings | Return types, response models, emitted event names, or mutated state attributes. |
+| `fields` | array of strings (legacy) | Supported for backwards compatibility (maps to input fields). |
+| `calls` | array of strings or objects | Downstream symbols, files (`file:symbol`), or node IDs this symbol calls. Cross-layer bridges are created with 100% confidence. |
+| `layer_id` | string (optional) | Explicitly reassign the architectural layer ID if the AST classification miscategorized it. |
 
-`fields` and `calls` may be omitted or empty. An object with only `id` and `intent` is
+`input_fields`, `output_fields`, and `calls` may be omitted or empty. An object with only `id` and `intent` is
 valid and useful.
-
-An object wrapper is also accepted for convenience — `{"enrichments": [...]}`,
-`{"nodes": [...]}`, `{"items": [...]}` or `{"results": [...]}` — but the bare array is
-the canonical form.
 
 ---
 
@@ -122,8 +139,10 @@ the canonical form.
    A wrong `calls` entry creates a real, wrong edge in the graph that later queries will
    follow.
 
-3. **`calls` entries are resolved by TF-IDF search with a `0.35` score floor.** Exact
-   identifiers resolve well; prose does not.
+3. **`calls` entries are resolved with 2-tier high precision.**
+   - **Tier 1 (Exact Match, 100% confidence):** Exact symbol names (`ApplicationsService`),
+     function names, node IDs, file paths (`calc.ts`), or database table names (`pension_cases`).
+   - **Tier 2 (Vector Fallback):** Semantic search with a calibrated 0.35 score floor.
 
    | Good | Bad |
    | --- | --- |
@@ -132,9 +151,7 @@ the canonical form.
    | `pension_cases` | `the database` |
    | `JwtAuthGuard` | `auth stuff` |
 
-   Anything scoring below the floor is dropped silently, so a vague entry is simply
-   wasted work. Prefer the exact symbol name, file name, or table/model name as it
-   appears in the source.
+   Prefer the exact symbol name, file name, or table/model name as it appears in the source.
 
 4. **Copy `id` verbatim.** Do not normalize, shorten or re-case it.
 

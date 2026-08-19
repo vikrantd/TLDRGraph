@@ -4,11 +4,17 @@ CLI Entry Point for CodeChakra: Multi-layer code flow & hybrid semantic search e
 
 import os
 import json
+import yaml
 import click
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
-from .graph_loader import GraphLoader, BRIDGE_SCORE_FLOOR, bridge_score_floor
+from .graph_loader import (
+    GraphLoader,
+    BRIDGE_SCORE_FLOOR,
+    bridge_score_floor,
+    resolve_call_target,
+)
 from .flow_engine import FlowEngine
 from .installer import install_agent_rules, gitignore_warnings
 from .visualizer import generate_visualizer_html
@@ -44,16 +50,21 @@ AGENT_ENRICHMENT_SOURCE = "agent"
 STATE_DIR = ".codechakra"
 
 #: Written by `queue-enrichment`, read by the coding agent.
-REQUEST_FILENAME = "enrichment_request.json"
+REQUEST_FILENAME = "enrichment_request.yaml"
+LEGACY_REQUEST_FILENAME = "enrichment_request.json"
 
 #: Written by the coding agent, read by `apply-enrichment`.
-RESPONSE_FILENAME = "enrichment_response.json"
+RESPONSE_FILENAME = "enrichment_response.yaml"
+LEGACY_RESPONSE_FILENAME = "enrichment_response.json"
 
 #: Pre-split filename. Still honoured as a response so hand-written work is never stranded.
 LEGACY_FILENAME = "pending_enrichment.json"
 
 #: Paging / progress state shared by queue-enrichment and apply-enrichment.
 CURSOR_FILENAME = "enrichment_cursor.json"
+
+#: Audit log recording all applied enrichments and forged linkages.
+AUDIT_LOG_FILENAME = "enrichment_audit.log"
 
 #: Display name of the utility bucket, resolved from the layer registry.
 #: Exported for humans and legacy callers only -- the checks below compare the
@@ -80,19 +91,32 @@ def _state_path(root: str, filename: str) -> str:
     return os.path.join(root, STATE_DIR, filename)
 
 
-def _read_json(path: str) -> Any:
+def _read_payload(path: str) -> Any:
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            content = f.read().strip()
+            if path.endswith(".json") or content.startswith("{") or content.startswith("["):
+                try:
+                    return json.loads(content)
+                except Exception:
+                    pass
+            return yaml.safe_load(content)
     except (OSError, ValueError):
         return None
 
 
-def _write_json(path: str, payload: Any) -> str:
+def _write_payload(path: str, payload: Any) -> str:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+        if path.endswith(".json"):
+            json.dump(payload, f, indent=2)
+        else:
+            yaml.dump(payload, f, default_flow_style=False, sort_keys=False)
     return path
+
+
+_read_json = _read_payload
+_write_json = _write_payload
 
 
 def coerce_enrichment_items(data: Any) -> List[Dict[str, Any]]:
@@ -111,7 +135,7 @@ def coerce_enrichment_items(data: Any) -> List[Dict[str, Any]]:
 
 
 def _read_cursor(root: str) -> Dict[str, List[str]]:
-    data = _read_json(_state_path(root, CURSOR_FILENAME))
+    data = _read_payload(_state_path(root, CURSOR_FILENAME))
     if not isinstance(data, dict):
         data = {}
     queued = data.get("queued")
@@ -123,7 +147,7 @@ def _read_cursor(root: str) -> Dict[str, List[str]]:
 
 
 def _write_cursor(root: str, queued: List[str], applied: List[str]) -> str:
-    return _write_json(_state_path(root, CURSOR_FILENAME), {
+    return _write_payload(_state_path(root, CURSOR_FILENAME), {
         "schema": "codechakra/enrichment-cursor@1",
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "queued": sorted(set(queued)),
@@ -172,9 +196,10 @@ def needs_agent_enrichment(data: Dict[str, Any]) -> bool:
     """
     if layer_id_of(data) == get_registry().utility_id:
         return False
-    if not (data.get("intent") or "").strip():
-        return True
-    return (data.get("enrichment_source") or "") == HEURISTIC_ENRICHMENT_SOURCE
+    source = data.get("enrichment_source") or ""
+    if source == AGENT_ENRICHMENT_SOURCE:
+        return False
+    return True
 
 
 def _enrichment_candidates(loader: GraphLoader, degrees: Dict[str, Tuple[int, int]]) -> List[Dict[str, Any]]:
@@ -194,6 +219,7 @@ def _enrichment_candidates(loader: GraphLoader, degrees: Dict[str, Tuple[int, in
         candidates.append({
             "id": nid,
             "label": data.get("label", nid),
+            "layer_id": layer_id_of(data),
             "layer": data.get("layer", ""),
             "file": data.get("file", ""),
             "source_location": data.get("source_location"),
@@ -346,8 +372,8 @@ def queue_enrichment(path, limit, requeue, reset):
     """
     Queue the highest-value un-enriched nodes for the coding agent.
 
-    Writes .codechakra/enrichment_request.json. The agent reads the source files and
-    writes its answer to a DIFFERENT file, .codechakra/enrichment_response.json, which
+    Writes .codechakra/enrichment_request.yaml. The agent reads the source files and
+    writes its answer to a DIFFERENT file, .codechakra/enrichment_response.yaml, which
     `apply-enrichment` then merges. Running this twice advances through the backlog
     instead of repeating the same nodes.
     """
@@ -363,8 +389,8 @@ def queue_enrichment(path, limit, requeue, reset):
     # Anything already answered in a response file counts as done, even if
     # apply-enrichment has not run yet.
     answered = set(cursor["applied"])
-    for filename in (RESPONSE_FILENAME, LEGACY_FILENAME):
-        for item in coerce_enrichment_items(_read_json(_state_path(path, filename))):
+    for filename in (RESPONSE_FILENAME, LEGACY_RESPONSE_FILENAME, "pending_enrichment.yaml", LEGACY_FILENAME):
+        for item in coerce_enrichment_items(_read_payload(_state_path(path, filename))):
             if item.get("id"):
                 answered.add(str(item["id"]))
 
@@ -388,22 +414,20 @@ def queue_enrichment(path, limit, requeue, reset):
 
     request_path = _state_path(path, REQUEST_FILENAME)
     response_path = _state_path(path, RESPONSE_FILENAME)
-    _write_json(request_path, {
+    _write_payload(request_path, {
         "schema": "codechakra/enrichment-request@1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "response_file": os.path.join(STATE_DIR, RESPONSE_FILENAME),
         "contract": os.path.join(STATE_DIR, "AGENT_CONTRACT.md"),
         "instructions": [
-            "Open and READ each node's source file before writing its intent - you have "
-            "the repo, that is the whole point of this path.",
-            "Do NOT invent fields or calls. Omit anything you cannot verify in the code; "
-            "an empty list is a correct answer.",
-            "'calls' entries are resolved to nodes by TF-IDF search with a "
-            f"{BRIDGE_SCORE_FLOOR} score floor - use exact symbol, file or table names "
-            "(ApplicationsService, calc.ts, pension_cases), not vague prose.",
+            "Open and READ each node's source file before writing its intent - you have the repo.",
+            "Write 'intent' in Markdown (single-line summary or rich multiline markdown). Add as much context as needed.",
+            "In 'input_fields', list input arguments, parameters, payload attributes, or request body fields.",
+            "In 'output_fields', list return values, response schemas, emitted event names, or mutated state fields.",
+            "In 'calls', specify exact downstream targets: node ID, file:symbol (e.g. 'src/services/calc.ts:calculate'), file path, or symbol name.",
+            "When multiple methods share the same name across files, use 'file_path:method' or exact node 'id' to ensure precise linking.",
             "Copy each 'id' verbatim.",
-            f"Write a JSON array of {{id, intent, fields, calls}} to "
-            f"{os.path.join(STATE_DIR, RESPONSE_FILENAME)} - NOT back into this file.",
+            f"Write a YAML list of {{id, intent, input_fields, output_fields, calls}} to {os.path.join(STATE_DIR, RESPONSE_FILENAME)} (NOT back into this request file).",
             "Then run: codechakra apply-enrichment",
         ],
         "ordering": "cross_layer_degree desc, then degree (in+out) desc, then id asc",
@@ -440,48 +464,47 @@ def apply_enrichment(enrichment_file, path):
     """
     Apply the agent's enrichment response into the graph, SQLite cache and vector index.
 
-    With no argument, reads .codechakra/enrichment_response.json, falling back to the
-    legacy .codechakra/pending_enrichment.json when it is the only file present.
+    With no argument, reads .codechakra/enrichment_response.yaml (or .json), falling back to
+    legacy response files when present.
     """
     if not enrichment_file:
-        for filename in (RESPONSE_FILENAME, LEGACY_FILENAME):
+        for filename in (RESPONSE_FILENAME, LEGACY_RESPONSE_FILENAME, "pending_enrichment.yaml", LEGACY_FILENAME):
             candidate = _state_path(path, filename)
             if os.path.isfile(candidate):
                 enrichment_file = candidate
-                if filename == LEGACY_FILENAME:
-                    click.echo(f"ℹ️  No {RESPONSE_FILENAME}; using legacy {LEGACY_FILENAME}.")
+                if filename in (LEGACY_RESPONSE_FILENAME, "pending_enrichment.yaml", LEGACY_FILENAME):
+                    click.echo(f"ℹ️  Reading enrichment from {filename}.")
                 break
     if not enrichment_file:
         raise click.ClickException(
             f"No enrichment response found. Expected {_state_path(path, RESPONSE_FILENAME)} "
-            f"(or the legacy {_state_path(path, LEGACY_FILENAME)}). "
+            f"(or {_state_path(path, LEGACY_RESPONSE_FILENAME)}). "
             "Run `codechakra queue-enrichment` first."
         )
 
-    raw = _read_json(enrichment_file)
+    raw = _read_payload(enrichment_file)
     if raw is None:
-        raise click.ClickException(f"Could not parse JSON from {enrichment_file}")
+        raise click.ClickException(f"Could not parse payload from {enrichment_file}")
 
-    request_path = _state_path(path, REQUEST_FILENAME)
-    if os.path.abspath(enrichment_file) == os.path.abspath(request_path):
-        raise click.ClickException(
-            f"{request_path} is the request, not the response. Write the agent's answer to "
-            f"{_state_path(path, RESPONSE_FILENAME)} instead - the request is regenerated "
-            "on every `queue-enrichment` run."
-        )
+    for req_fn in (REQUEST_FILENAME, LEGACY_REQUEST_FILENAME):
+        request_path = _state_path(path, req_fn)
+        if os.path.abspath(enrichment_file) == os.path.abspath(request_path):
+            raise click.ClickException(
+                f"{request_path} is the request, not the response. Write the agent's answer to "
+                f"{_state_path(path, RESPONSE_FILENAME)} instead - the request is regenerated "
+                "on every `queue-enrichment` run."
+            )
 
     items = coerce_enrichment_items(raw)
     if not items:
         raise click.ClickException(
-            f"{enrichment_file} contains no enrichment objects. Expected a JSON array of "
+            f"{enrichment_file} contains no enrichment objects. Expected a list of "
             "{id, intent, fields, calls}."
         )
 
     loader = GraphLoader(path)
     loader.load_or_extract(enrich_llm=False)
 
-    # Calibrated for whichever retrieval backend is actually live -- a fused
-    # hybrid score is not on the same scale as a raw TF-IDF cosine.
     floor = bridge_score_floor(loader.vector_store)
 
     applied_ids: List[str] = []
@@ -500,34 +523,53 @@ def apply_enrichment(enrichment_file, path):
 
         node_data = loader.graph.nodes[nid]
         intent = item.get("intent", "")
-        fields = item.get("fields", []) or []
+        input_fields = item.get("input_fields", []) or []
+        output_fields = item.get("output_fields", []) or []
+        legacy_fields = item.get("fields", []) or []
         calls = item.get("calls", []) or []
+
+        # Optional layer_id override from agent
+        override_lid = item.get("layer_id")
+        if override_lid and override_lid in get_registry():
+            node_data["layer_id"] = override_lid
+            node_data["layer"] = get_registry().name(override_lid)
+            node_data["layer_source"] = AGENT_ENRICHMENT_SOURCE
 
         if intent:
             node_data["intent"] = intent
-            node_data["summary"] = f"{node_data['layer']}: {node_data['label']} - {intent}"
+            first_line = intent.strip().split("\n")[0].lstrip("#- *").strip()
+            node_data["summary"] = f"{node_data['layer']}: {node_data['label']} - {first_line or intent}"
             node_data["enrichment_source"] = AGENT_ENRICHMENT_SOURCE
-        if fields:
-            node_data["fields"] = fields
 
+        if input_fields or output_fields:
+            node_data["input_fields"] = input_fields
+            node_data["output_fields"] = output_fields
+            node_data["fields"] = list(input_fields) + list(output_fields)
+        elif legacy_fields:
+            node_data["input_fields"] = legacy_fields
+            node_data["output_fields"] = []
+            node_data["fields"] = legacy_fields
+
+        fields_dict = {
+            "input_fields": node_data.get("input_fields", []),
+            "output_fields": node_data.get("output_fields", []),
+            "fields": node_data.get("fields", [])
+        }
         loader.hash_gate.update_node(
             node_id=nid,
             file_path=node_data.get("file", ""),
             content=loader.node_signature(node_data),
             layer=node_data.get("layer", ""),
             summary=node_data.get("summary", ""),
-            fields_json=json.dumps(node_data.get("fields", [])),
+            fields_json=json.dumps(fields_dict),
             intent=node_data.get("intent", "")
         )
 
         for call_target in calls:
-            matches = loader.vector_store.search(str(call_target), top_k=1)
-            if not matches:
-                unresolved.append(str(call_target))
-                continue
-            tgt_doc, score = matches[0]
-            tgt_id = tgt_doc.get("id")
-            if tgt_id and tgt_id != nid and score >= floor:
+            tgt_id, score = resolve_call_target(
+                loader.graph, loader.vector_store, call_target, nid, floor
+            )
+            if tgt_id:
                 loader.graph.add_edge(
                     nid, tgt_id,
                     relation="cross_layer_link",
@@ -550,6 +592,32 @@ def apply_enrichment(enrichment_file, path):
     _write_cursor(path, remaining_queued, cursor["applied"] + applied_ids)
 
     still_pending = sum(1 for _, d in loader.graph.nodes(data=True) if needs_agent_enrichment(d))
+
+    # Append to audit log
+    audit_path = _state_path(path, AUDIT_LOG_FILENAME)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    try:
+        with open(audit_path, "a", encoding="utf-8") as f:
+            f.write(f"\n--- Enrichment Batch Applied: {timestamp} ---\n")
+            f.write(f"Source file: {enrichment_file}\n")
+            f.write(f"Applied nodes ({len(applied_ids)}): {', '.join(applied_ids)}\n")
+            f.write(f"Bridge edges created: {bridges}\n")
+            for item in items:
+                nid = str(item.get("id") or "")
+                if nid in applied_ids:
+                    f.write(f"  • [{nid}] intent:\n    {item.get('intent', '')}\n")
+                    if item.get("input_fields"):
+                        f.write(f"    input_fields: {item.get('input_fields')}\n")
+                    if item.get("output_fields"):
+                        f.write(f"    output_fields: {item.get('output_fields')}\n")
+                    elif item.get("fields"):
+                        f.write(f"    fields: {item.get('fields')}\n")
+                    if item.get("calls"):
+                        f.write(f"    calls: {item.get('calls')}\n")
+            if unresolved:
+                f.write(f"Unresolved call targets: {', '.join(unresolved)}\n")
+    except Exception:
+        pass
 
     click.echo(f"✅ Applied {len(applied_ids)} enrichment(s) from {enrichment_file}")
     click.echo(f"🔗 Created {bridges} cross-layer bridge edge(s) "

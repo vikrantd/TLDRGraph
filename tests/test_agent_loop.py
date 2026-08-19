@@ -137,7 +137,11 @@ def state(loop_repo):
         path = loop_repo / STATE_DIR / filename
         if not path.is_file():
             return None
-        return json.loads(path.read_text(encoding="utf-8"))
+        content = path.read_text(encoding="utf-8")
+        if str(filename).endswith(".json"):
+            return json.loads(content)
+        import yaml
+        return yaml.safe_load(content)
 
     return _state
 
@@ -157,7 +161,11 @@ def no_enrichment(monkeypatch):
 def _write_response(root: Path, items, filename=RESPONSE_FILENAME) -> Path:
     path = root / STATE_DIR / filename
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(items, indent=2), encoding="utf-8")
+    if str(filename).endswith(".json"):
+        path.write_text(json.dumps(items, indent=2), encoding="utf-8")
+    else:
+        import yaml
+        path.write_text(yaml.dump(items, default_flow_style=False), encoding="utf-8")
     return path
 
 
@@ -724,10 +732,110 @@ def test_query_still_accepts_top_k_and_path(loop_repo):
 
 
 def test_state_filenames_are_the_documented_ones():
-    assert REQUEST_FILENAME == "enrichment_request.json"
-    assert RESPONSE_FILENAME == "enrichment_response.json"
+    assert REQUEST_FILENAME == "enrichment_request.yaml"
+    assert RESPONSE_FILENAME == "enrichment_response.yaml"
     assert LEGACY_FILENAME == "pending_enrichment.json"
     assert cli_module.STATE_DIR == ".codechakra"
+
+
+def test_queue_request_includes_layer_id(run, state):
+    run("queue-enrichment", "--limit", "2")
+    request = state(REQUEST_FILENAME)
+    assert request is not None
+    for node in request["nodes"]:
+        assert "layer_id" in node
+        assert node["layer_id"] in ("ui", "api", "service", "data", "async", "devops", "utility")
+
+
+def test_apply_resolves_exact_symbol_call_with_100_percent_confidence(run, loop_repo, state):
+    run("queue-enrichment", "--limit", "2")
+    nodes = state(REQUEST_FILENAME)["nodes"]
+    src_node = nodes[0]
+    
+    # Pick a distinct symbol that is not src_node
+    target_label = "SubmitCaseButton" if src_node["label"] != "SubmitCaseButton" else "PensionCalculatorService"
+    
+    _write_response(loop_repo, [{
+        "id": src_node["id"],
+        "intent": "Dispatches requests downstream.",
+        "calls": [target_label]
+    }])
+    
+    res = run("apply-enrichment")
+    assert res.exit_code == 0
+    assert "Created 1 cross-layer bridge edge(s)" in res.output
+    
+    snapshot = _snapshot(loop_repo)
+    edges = [e for e in snapshot["edges"] if e.get("relation") == "cross_layer_link"]
+    assert len(edges) >= 1
+    assert any(e["source"] == src_node["id"] and e.get("confidence") == 1.0 for e in edges)
+
+
+def test_apply_resolves_qualified_file_symbol_call(run, loop_repo, state):
+    run("queue-enrichment", "--limit", "2")
+    src_node = state(REQUEST_FILENAME)["nodes"][0]
+
+    # Qualified target: "path/to/file.ts:Symbol"
+    _write_response(loop_repo, [{
+        "id": src_node["id"],
+        "intent": "Dispatches to calculator service.",
+        "calls": ["backend/src/pension/pension-calculator.service.ts:PensionCalculatorService"]
+    }])
+
+    res = run("apply-enrichment")
+    assert res.exit_code == 0
+    assert "Created 1 cross-layer bridge edge(s)" in res.output
+
+    snapshot = _snapshot(loop_repo)
+    edges = [e for e in snapshot["edges"] if e.get("relation") == "cross_layer_link"]
+    assert any(e["source"] == src_node["id"] and e["target"] == "be_pension_calc_service" and e["confidence"] == 1.0 for e in edges)
+
+
+def test_apply_resolves_structured_dict_call(run, loop_repo, state):
+    run("queue-enrichment", "--limit", "2")
+    src_node = state(REQUEST_FILENAME)["nodes"][0]
+
+    # Structured dict target
+    _write_response(loop_repo, [{
+        "id": src_node["id"],
+        "intent": "Dispatches to prisma model.",
+        "calls": [{"file": "backend/prisma/schema.prisma", "label": "PrismaCaseModel"}]
+    }])
+
+    res = run("apply-enrichment")
+    assert res.exit_code == 0
+    assert "Created 1 cross-layer bridge edge(s)" in res.output
+
+    snapshot = _snapshot(loop_repo)
+    edges = [e for e in snapshot["edges"] if e.get("relation") == "cross_layer_link"]
+    assert any(e["source"] == src_node["id"] and e["target"] == "be_prisma_case_model" and e["confidence"] == 1.0 for e in edges)
+
+
+def test_disambiguate_duplicate_symbol_prioritizes_live_over_dead_code(loop_repo):
+    import networkx as nx
+    from codechakra.graph_loader import resolve_call_target
+    from codechakra.vector_store import LocalVectorStore
+
+    g = nx.DiGraph()
+    # Source node
+    g.add_node("caller", id="caller", label="Caller", file="src/caller.ts")
+
+    # Duplicate symbol 1: in dead code file (marked as candidate)
+    g.add_node("dead_calc", id="dead_calc", label="calculate", file="src/legacy/dead_calc.ts", dead_code_status="candidate")
+
+    # Duplicate symbol 2: in active service
+    g.add_node("live_calc", id="live_calc", label="calculate", file="src/services/calc.service.ts", dead_code_status="live")
+
+    vs = LocalVectorStore(str(loop_repo / "test_disambiguate_vec.json"))
+    # Bare name "calculate" should disambiguate and select live_calc over dead_calc
+    tgt_id, conf = resolve_call_target(g, vs, "calculate", "caller")
+    assert tgt_id == "live_calc"
+    assert conf == 1.0
+
+    # Qualified target should explicitly select dead_calc if specifically asked
+    tgt_dead, conf_dead = resolve_call_target(g, vs, "src/legacy/dead_calc.ts:calculate", "caller")
+    assert tgt_dead == "dead_calc"
+    assert conf_dead == 1.0
 
 
 # --------------------------------------------------------------------------- #
@@ -774,3 +882,31 @@ def test_heuristic_node_is_requeued_but_agent_node_is_not(run, loop_repo, state)
 
     run("queue-enrichment", "--limit", "0", "--reset")
     assert nid in {n["id"] for n in state(REQUEST_FILENAME)["nodes"]}
+
+
+def test_apply_persists_input_fields_output_fields_and_markdown_intent(run, loop_repo, state):
+    run("queue-enrichment", "--limit", "1")
+    nid = state(REQUEST_FILENAME)["nodes"][0]["id"]
+    
+    md_intent = """### Component Controller
+Dispatches workflow tasks across services.
+- **Role**: API Gateway entrypoint
+- **Authorizer**: JWT Auth Guard"""
+
+    _write_response(loop_repo, [{
+        "id": nid,
+        "intent": md_intent,
+        "input_fields": ["caseId", "userPayload"],
+        "output_fields": ["status", "assignedTo"],
+        "calls": ["PensionCalculatorService"]
+    }])
+    
+    res = run("apply-enrichment")
+    assert res.exit_code == 0
+    
+    snapshot = _snapshot(loop_repo)
+    node = next(n for n in snapshot["nodes"] if n["id"] == nid)
+    assert node["intent"] == md_intent
+    assert node["input_fields"] == ["caseId", "userPayload"]
+    assert node["output_fields"] == ["status", "assignedTo"]
+    assert set(node["fields"]) == {"caseId", "userPayload", "status", "assignedTo"}
