@@ -1,11 +1,14 @@
 """
 Propose Layers: Dynamic Multi-Layer Discovery & Configuration Generator.
 
-Samples repository evidence (directory tree, framework markers, sample paths,
-dependencies, and entry points) and determines the optimal architectural layer set:
-1. Via LLM (Gemini, OpenAI, Ollama) if available or through the coding agent loop.
-2. Via intelligent repository archetype detection (CLI app, Library, Full-stack Web,
-   Backend API, Data/ML Pipeline, Generic Modular) as an offline, zero-token fallback.
+Samples repository evidence (directory tree, framework markers, extracted
+symbols, dependencies, entry points) and hands it to an agent that reads the
+actual source before deciding what the layers are.
+
+**There is no template fallback, by design.** A generic archetype layer set
+looks plausible, classifies badly, and -- worst of all -- silently becomes the
+answer. TLDRGraph would rather stop and ask. If no layer set can be obtained,
+``needs_layers`` is returned and the caller tells the agent what to write.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
+from . import agent_runner, paths
 from .layer_config import (
     CONFIG_FILENAME_YAML,
     config_path,
@@ -246,289 +250,199 @@ def detect_repository_archetype(root_dir: str) -> str:
     return ARCHETYPE_GENERIC
 
 
-def archetype_layer_set(archetype: str, evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+#: Sketches of how codebases *can* divide, to show the shape of an answer.
+#:
+#: Deliberately prose, not JSON: a copyable template gets copied. The point is
+#: to convey that a layer is "a place where responsibility changes hands", then
+#: get out of the way so the agent names what it actually found.
+LAYER_SET_IDEAS = [
+    "A web app might split presentation from request handling from domain logic "
+    "from persistence, with background jobs and deployment config as their own tiers.",
+    "A CLI tool might split the command surface from the processing engine from "
+    "local state, with adapters to outside systems separate again.",
+    "A library might split its public API from the core implementation from its "
+    "data types, with backend adapters separate.",
+    "A data pipeline might split ingestion from transformation from model "
+    "training from serving.",
+    "None of these will fit this repository. The useful question is not 'which "
+    "one is it?' but 'where does responsibility change hands in THIS code, and "
+    "what would a new engineer need named?'",
+]
+
+
+#: Prompt for a coding-agent CLI running headless inside the repository.
+#:
+#: The difference from the hosted-LLM prompt is the first instruction: the agent
+#: has the repo on disk, so it is told to READ files rather than infer a layer
+#: set from a directory listing. That is the entire reason this path exists.
+AGENT_LAYERS_PROMPT = """You are designing the architectural layer map for the repository you currently have open.
+
+Do this before answering:
+1. Read the entry points and a representative sample of real source files across
+   the main directories. The evidence bundle below lists candidates; it is a
+   starting point, NOT a substitute for opening the files.
+2. Work out what this codebase actually does and how responsibility is split.
+   Name the layers after THIS repository's concepts, not a generic template.
+   For the shape of an answer only:
+{ideas}
+3. Derive matching rules from real paths and real symbol names you saw.
+
+Then return ONLY a JSON object, no prose and no markdown fence, of this shape:
+
+{{
+  "utility_id": "<id of the catch-all layer>",
+  "layers": [
+    {{
+      "id": "short_machine_id",
+      "name": "Layer 1: Human Friendly Name",
+      "order": 1,
+      "description": "One sentence on what lives here",
+      "rules": [
+        {{"file_contains": ["substring", "another"], "exclude_file": ["optional"]}},
+        {{"label_contains": ["SymbolNamePart"]}}
+      ]
+    }}
+  ]
+}}
+
+Hard requirements:
+- 3 to 6 layers plus exactly one catch-all utility layer.
+- Every layer needs a unique `id`, a unique `name`, and a sequential integer
+  `order` starting at 1.
+- Exactly one layer's `id` equals `utility_id`, and that layer has `rules: []`.
+- Supported rule keys: file_contains, exclude_file, path_regex, label_contains,
+  exclude_label, label_ends_with, type_in, id_prefix. Each value is a list of strings.
+- Rules must match paths that really exist here. A rule that matches nothing is
+  worse than no rule, and a rule that matches everything collapses the map.
+
+Repository root: {root}
+
+Evidence bundle (sampled automatically, verify against the real files):
+{evidence}
+"""
+
+
+def build_agent_layer_prompt(root: str, evidence: Dict[str, Any]) -> str:
+    """Renders the headless-agent prompt for a layer proposal."""
+    return AGENT_LAYERS_PROMPT.format(
+        root=root,
+        ideas="\n".join(f"     - {idea}" for idea in LAYER_SET_IDEAS),
+        evidence=json.dumps(evidence, indent=2, default=str),
+    )
+
+
+#: How many of the busiest files, and symbols within them, to put in front of the
+#: agent. Enough to show the shape of the codebase, small enough to stay cheap.
+_EVIDENCE_TOP_FILES = 40
+_EVIDENCE_SYMBOLS_PER_FILE = 8
+
+
+def _extracted_symbol_evidence(root_dir: str) -> Dict[str, Any]:
     """
-    Returns a customized, multi-layer architectural definition tailored to the given archetype.
+    Real symbols per file, taken from graphify's raw AST export.
+
+    Filenames alone under-describe a codebase: two repos with identical
+    directory listings can be doing entirely different things. ``init`` runs
+    extraction *before* asking for layers precisely so this is available, and
+    files are ranked by symbol count so the busiest ones lead.
+
+    Returns ``{}`` when nothing has been extracted yet -- the caller degrades to
+    filename evidence rather than failing.
     """
-    if archetype == ARCHETYPE_CLI:
-        return {
-            "utility_id": "utility",
-            "layers": [
-                {
-                    "id": "cli",
-                    "name": "Layer 1: CLI & Commands",
-                    "order": 1,
-                    "description": "Command line interface, argument parsing, options, and commands",
-                    "rules": [
-                        {"file_contains": ["cli.py", "/cli/", "commands/", "cmd/", "bin/"]},
-                        {"file_contains": ["cli"], "exclude_file": ["flow_engine", "vector_store", "graph_loader", "classifier"]},
-                        {"label_contains": ["cli_command", "cli_main", "main_cli", "subcommand"]}
-                    ]
-                },
-                {
-                    "id": "engine",
-                    "name": "Layer 2: Core Flow Engine & Logic",
-                    "order": 2,
-                    "description": "Core algorithms, flow traversal, analysis, classification, and extractors",
-                    "rules": [
-                        {"file_contains": ["flow_engine", "classifier", "extractors", "deadcode", "propose_layers", "hierarchy", "engine"]},
-                        {"label_contains": ["engine", "flow", "classify", "extract", "traverse", "walk", "rule"]}
-                    ]
-                },
-                {
-                    "id": "storage",
-                    "name": "Layer 3: Graph Loader, Storage & Index",
-                    "order": 3,
-                    "description": "Graph ingestion, SQLite caching, hash gating, vector store, and configuration",
-                    "rules": [
-                        {"file_contains": ["graph_loader", "hash_gate", "vector_store", "layer_config", "layers", "rules"]},
-                        {"label_contains": ["loader", "graph", "store", "cache", "gate", "config", "registry"]}
-                    ]
-                },
-                {
-                    "id": "integrations",
-                    "name": "Layer 4: Agent Loop & Visualizer",
-                    "order": 4,
-                    "description": "Host-agent rules installer, LLM enrichment providers, and HTML visualizer",
-                    "rules": [
-                        {"file_contains": ["installer", "llm_enricher", "visualizer"]},
-                        {"label_contains": ["installer", "visualizer", "enricher", "agent"]}
-                    ]
-                },
-                {
-                    "id": "utility",
-                    "name": "General / Utility",
-                    "order": 5,
-                    "description": "Shared utility helpers, formatting, and common routines",
-                    "rules": []
-                }
-            ]
-        }
+    graph_path = paths.graphify_graph_path(os.path.abspath(root_dir))
+    if not os.path.isfile(graph_path):
+        return {}
 
-    if archetype == ARCHETYPE_FULLSTACK:
-        return {
-            "utility_id": "utility",
-            "layers": [
-                {
-                    "id": "ui",
-                    "name": "Layer 1: Presentation & UI",
-                    "order": 1,
-                    "description": "User interface components, pages, views, and forms",
-                    "rules": [
-                        {"file_contains": ["frontend/", "src/app", "src/components", "pages/"]},
-                        {"label_contains": ["View", "Page", "Component", "Button", "Form"]}
-                    ]
-                },
-                {
-                    "id": "api",
-                    "name": "Layer 2: API Gateway & Routing",
-                    "order": 2,
-                    "description": "Controllers, endpoints, route handlers, and guards",
-                    "rules": [
-                        {"file_contains": ["controller", "route", "api/"]},
-                        {"label_contains": ["Controller", "Route", "Endpoint", "Guard"]}
-                    ]
-                },
-                {
-                    "id": "service",
-                    "name": "Layer 3: Domain & Business Services",
-                    "order": 3,
-                    "description": "Business logic, workflows, calculation engines, and service layer",
-                    "rules": [
-                        {"file_contains": ["service", "calc", "workflow", "domain/"]},
-                        {"label_contains": ["Service", "Calculator", "Workflow", "Manager"]}
-                    ]
-                },
-                {
-                    "id": "data",
-                    "name": "Layer 4: Data & Persistence",
-                    "order": 4,
-                    "description": "Database models, repositories, schemas, and entities",
-                    "rules": [
-                        {"file_contains": ["prisma", "repository", "entities", "schema.prisma", "database"]},
-                        {"label_contains": ["Repository", "Entity", "Model", "Prisma"]}
-                    ]
-                },
-                {
-                    "id": "async",
-                    "name": "Layer 5: Async & Background Tasks",
-                    "order": 5,
-                    "description": "Cron jobs, queue workers, polling, and scheduled tasks",
-                    "rules": [
-                        {"file_contains": ["cron", "queue", "worker", "polling", "tasks"]},
-                        {"label_contains": ["Job", "Worker", "Cron", "Polling"]}
-                    ]
-                },
-                {
-                    "id": "devops",
-                    "name": "Layer 6: DevOps & Infrastructure",
-                    "order": 6,
-                    "description": "Docker, Kubernetes, CI/CD pipelines, and cloud deployment configs",
-                    "rules": [
-                        {"file_contains": ["docker", "k8s", "helm", ".github/workflows", "Dockerfile"]}
-                    ]
-                },
-                {
-                    "id": "utility",
-                    "name": "General / Utility",
-                    "order": 7,
-                    "description": "Shared helpers and catch-all",
-                    "rules": []
-                }
-            ]
-        }
+    try:
+        with open(graph_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return {}
 
-    if archetype == ARCHETYPE_BACKEND:
-        return {
-            "utility_id": "utility",
-            "layers": [
-                {
-                    "id": "api",
-                    "name": "Layer 1: API & Handlers",
-                    "order": 1,
-                    "description": "HTTP/gRPC endpoints, routing, controllers, and middleware",
-                    "rules": [
-                        {"file_contains": ["controller", "router", "endpoint", "handler", "api/"]},
-                        {"label_contains": ["Controller", "Handler", "Router", "Endpoint"]}
-                    ]
-                },
-                {
-                    "id": "service",
-                    "name": "Layer 2: Domain Services",
-                    "order": 2,
-                    "description": "Core business logic, domain calculations, and application services",
-                    "rules": [
-                        {"file_contains": ["service", "domain", "logic", "usecase"]},
-                        {"label_contains": ["Service", "Logic", "Manager", "Workflow"]}
-                    ]
-                },
-                {
-                    "id": "data",
-                    "name": "Layer 3: Persistence & Repositories",
-                    "order": 3,
-                    "description": "Database models, schemas, repositories, and persistence layer",
-                    "rules": [
-                        {"file_contains": ["repository", "model", "entity", "schema", "db"]},
-                        {"label_contains": ["Repository", "Entity", "Model", "Table"]}
-                    ]
-                },
-                {
-                    "id": "async",
-                    "name": "Layer 4: Async & Worker Tasks",
-                    "order": 4,
-                    "description": "Background queues, event consumers, and cron schedules",
-                    "rules": [
-                        {"file_contains": ["worker", "task", "job", "queue", "consumer"]},
-                        {"label_contains": ["Worker", "Consumer", "Job", "Queue"]}
-                    ]
-                },
-                {
-                    "id": "utility",
-                    "name": "General / Utility",
-                    "order": 5,
-                    "description": "Shared helpers and cross-cutting utilities",
-                    "rules": []
-                }
-            ]
-        }
+    by_file: Dict[str, List[str]] = {}
+    for node in raw.get("nodes", []):
+        if not isinstance(node, dict):
+            continue
+        # graphify also emits `rationale` nodes whose label is a sentence of
+        # docstring prose. Those are ~a third of the export and would fill the
+        # evidence with English instead of the symbol names the rules match on.
+        if node.get("file_type") != "code":
+            continue
+        src = node.get("source_file") or node.get("file") or node.get("path")
+        label = node.get("label") or node.get("id")
+        if not src or not label:
+            continue
+        by_file.setdefault(str(src), []).append(str(label))
 
-    if archetype == ARCHETYPE_LIBRARY:
-        return {
-            "utility_id": "utility",
-            "layers": [
-                {
-                    "id": "public_api",
-                    "name": "Layer 1: Public API & Interfaces",
-                    "order": 1,
-                    "description": "Entry points, public facade, client classes, and exported functions",
-                    "rules": [
-                        {"file_contains": ["__init__.py", "api", "client", "index.ts", "public/"]},
-                        {"label_contains": ["Client", "API", "Facade", "Interface"]}
-                    ]
-                },
-                {
-                    "id": "core_engine",
-                    "name": "Layer 2: Core Processing & Engine",
-                    "order": 2,
-                    "description": "Core algorithms, parsing, processing, and computational logic",
-                    "rules": [
-                        {"file_contains": ["core", "engine", "processor", "parser", "builder"]},
-                        {"label_contains": ["Engine", "Processor", "Parser", "Builder", "Transformer"]}
-                    ]
-                },
-                {
-                    "id": "types_models",
-                    "name": "Layer 3: Types & Models",
-                    "order": 3,
-                    "description": "Data structures, types, interfaces, schemas, and entities",
-                    "rules": [
-                        {"file_contains": ["types", "models", "schema", "interfaces"]},
-                        {"label_contains": ["Type", "Model", "Schema", "Config"]}
-                    ]
-                },
-                {
-                    "id": "adapters",
-                    "name": "Layer 4: Adapters & Backends",
-                    "order": 4,
-                    "description": "Backend adapters, transports, network connectors, and storage drivers",
-                    "rules": [
-                        {"file_contains": ["adapter", "transport", "driver", "connector", "backend"]},
-                        {"label_contains": ["Adapter", "Transport", "Driver", "Connector"]}
-                    ]
-                },
-                {
-                    "id": "utility",
-                    "name": "General / Utility",
-                    "order": 5,
-                    "description": "Internal utilities and helpers",
-                    "rules": []
-                }
-            ]
-        }
+    if not by_file:
+        return {}
 
-    # Generic Modular Fallback
+    busiest = sorted(by_file.items(), key=lambda kv: (-len(kv[1]), kv[0]))
     return {
-        "utility_id": "utility",
-        "layers": [
-            {
-                "id": "interface",
-                "name": "Layer 1: Entry Points & Interface",
-                "order": 1,
-                "description": "Entry points, CLI, HTTP routing, or user interfaces",
-                "rules": [
-                    {"file_contains": ["main", "app", "cli", "entry", "interface"]},
-                    {"label_contains": ["main", "app", "cli", "Controller", "View"]}
-                ]
-            },
-            {
-                "id": "domain",
-                "name": "Layer 2: Core Domain Logic",
-                "order": 2,
-                "description": "Business logic, algorithms, calculation, and core operations",
-                "rules": [
-                    {"file_contains": ["service", "domain", "core", "logic", "engine"]},
-                    {"label_contains": ["Service", "Logic", "Engine", "Manager"]}
-                ]
-            },
-            {
-                "id": "storage",
-                "name": "Layer 3: Storage & Persistence",
-                "order": 3,
-                "description": "Data storage, repositories, models, cache, and state",
-                "rules": [
-                    {"file_contains": ["data", "db", "storage", "repository", "model", "cache"]},
-                    {"label_contains": ["Repository", "Model", "Store", "Cache"]}
-                ]
-            },
-            {
-                "id": "utility",
-                "name": "General / Utility",
-                "order": 4,
-                "description": "Shared helpers and catch-all utilities",
-                "rules": []
-            }
-        ]
+        "total_files": len(by_file),
+        "total_symbols": sum(len(v) for v in by_file.values()),
+        "symbols_by_file": {
+            path: sorted(set(labels))[:_EVIDENCE_SYMBOLS_PER_FILE]
+            for path, labels in busiest[:_EVIDENCE_TOP_FILES]
+        },
     }
+
+
+def collect_layer_evidence(root_dir: str = ".") -> Dict[str, Any]:
+    """The sampled repository evidence handed to an agent or LLM."""
+    root = os.path.abspath(root_dir)
+    evidence: Dict[str, Any] = {
+        "framework_markers": _collect_framework_markers(root),
+        "sampled_directory_clusters": _sample_repo_files(root),
+        "detected_archetype": detect_repository_archetype(root),
+    }
+    extracted = _extracted_symbol_evidence(root)
+    if extracted:
+        evidence["extracted_symbols"] = extracted
+    return evidence
+
+
+def propose_layers_with_agent(
+    root_dir: str = ".",
+    agent: Optional[Any] = None,
+    model: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """
+    Asks a headless coding-agent CLI to read the repo and design its layer set.
+
+    Returns ``(config, agent_name)`` on success, or ``(None, reason)`` where
+    reason is a short human-readable string explaining why nothing came back.
+    """
+    if agent is None:
+        agent = agent_runner.find_agent_cli()
+    if agent is None:
+        status = agent_runner.agent_status()
+        return None, str(status.get("detail") or status.get("reason") or "no agent available")
+
+    root = os.path.abspath(root_dir)
+    prompt = build_agent_layer_prompt(root, collect_layer_evidence(root))
+
+    try:
+        proposal = agent_runner.run_agent_json(agent, prompt, root, model=model)
+    except agent_runner.AgentError as err:
+        return None, str(err)
+
+    if isinstance(proposal, dict) and "layers" not in proposal:
+        for key in ("proposal", "layer_set", "config"):
+            nested = proposal.get(key)
+            if isinstance(nested, dict) and "layers" in nested:
+                proposal = nested
+                break
+
+    if not isinstance(proposal, dict) or "layers" not in proposal:
+        return None, f"{agent.display} did not return a layer set"
+
+    try:
+        validate_layer_config(proposal)
+    except ValueError as err:
+        return None, f"{agent.display} returned an invalid layer set: {err}"
+
+    return proposal, agent.name
 
 
 def propose_layers_with_llm(root_dir: str = ".", enricher: Optional[Any] = None) -> Optional[Dict[str, Any]]:
@@ -544,11 +458,7 @@ def propose_layers_with_llm(root_dir: str = ".", enricher: Optional[Any] = None)
             return None
 
     root = os.path.abspath(root_dir)
-    evidence = {
-        "framework_markers": _collect_framework_markers(root),
-        "sampled_directory_clusters": _sample_repo_files(root),
-        "detected_archetype": detect_repository_archetype(root),
-    }
+    evidence = collect_layer_evidence(root)
 
     try:
         proposal = enricher.propose_layers(evidence)
@@ -566,28 +476,65 @@ def propose_layers_with_llm(root_dir: str = ".", enricher: Optional[Any] = None)
     return None
 
 
+#: Returned as the ``source`` when no layer set could be obtained. The caller
+#: turns this into a NEXT ACTION for the agent instead of inventing layers.
+NEEDS_LAYERS = "needs_layers"
+
+
 def auto_configure_layers(
     root_dir: str = ".",
     enricher: Optional[Any] = None,
     force: bool = False,
-    use_llm: bool = True
-) -> Tuple[LayerRegistry, str, str]:
+    use_llm: bool = True,
+    use_agent: bool = False,
+    agent: Optional[Any] = None,
+    agent_model: Optional[str] = None,
+    notes: Optional[List[str]] = None,
+) -> Tuple[Optional[LayerRegistry], Optional[str], str]:
     """
-    Ensures .tldrgraph/layers.config.yaml exists by:
-    1. Loading existing configuration if present and not force.
-    2. Prompting LLM if use_llm is True and LLM is configured.
-    3. Auto-detecting archetype and generating a tailored archetype layer set.
+    Resolves this repository's architectural layers, or reports that it cannot.
 
-    Returns (LayerRegistry, saved_config_path, source_description).
+    In order:
+
+    1. An existing configuration, unless ``force``.
+    2. A headless coding-agent CLI -- **opt-in** (``use_agent``), because every
+       agent has different flags, auth and headless semantics and some ship no
+       working CLI at all. The file handshake is the path that generalises.
+    3. A hosted LLM, if an API key is configured. Sees the evidence bundle only.
+
+    If none of those produces a layer set, this returns ``(None, None,
+    NEEDS_LAYERS)``. It never falls back to a template: layers that were not
+    derived from this repository are worse than no layers, because they are
+    wrong in a way that looks right.
+
+    ``notes`` collects human-readable explanations of every path tried and
+    skipped, so the caller can tell the user what happened.
+
+    Returns ``(LayerRegistry | None, saved_config_path | None, source)``.
     """
     root = os.path.abspath(root_dir)
     existing_path = config_path(root)
+    log = notes if notes is not None else []
 
     if existing_path and not force:
         reg, _ = load_layer_config(root)
         return reg, existing_path, "existing_config"
 
-    # Try LLM proposal
+    # 1. Coding agent CLI, opt-in.
+    if use_agent:
+        if agent is None:
+            agent = agent_runner.find_agent_cli()
+        proposal, detail = propose_layers_with_agent(root, agent=agent, model=agent_model)
+        if proposal:
+            registry = LayerRegistry.from_records(
+                proposal["layers"], utility_id=str(proposal["utility_id"])
+            )
+            out_path = save_layer_config(root, registry)
+            return registry, out_path, f"agent:{detail}"
+        if detail:
+            log.append(f"Agent CLI layer proposal unavailable: {detail}")
+
+    # 2. Hosted LLM, evidence-only.
     if use_llm:
         proposal = propose_layers_with_llm(root, enricher=enricher)
         if proposal:
@@ -596,14 +543,7 @@ def auto_configure_layers(
             out_path = save_layer_config(root, registry)
             return registry, out_path, "llm_synthesis"
 
-    # Fallback to smart archetype detection
-    archetype = detect_repository_archetype(root)
-    layer_data = archetype_layer_set(archetype)
-    validate_layer_config(layer_data)
-    utility_id = str(layer_data["utility_id"])
-    registry = LayerRegistry.from_records(layer_data["layers"], utility_id=utility_id)
-    out_path = save_layer_config(root, registry)
-    return registry, out_path, f"archetype:{archetype}"
+    return None, None, NEEDS_LAYERS
 
 
 def generate_propose_request(root_dir: str = ".") -> str:
@@ -617,16 +557,11 @@ def generate_propose_request(root_dir: str = ".") -> str:
     os.makedirs(state_dir, exist_ok=True)
     req_path = os.path.join(state_dir, REQUEST_FILENAME)
 
-    archetype = detect_repository_archetype(root)
-    archetype_example = archetype_layer_set(archetype)
-
-    evidence = {
-        "detected_archetype": archetype,
-        "framework_markers": _collect_framework_markers(root),
-        "sampled_directory_clusters": _sample_repo_files(root),
-        "active_layers": [layer.as_record() for layer in get_registry().ordered()],
-        "active_utility_id": get_registry().utility_id,
-    }
+    evidence = collect_layer_evidence(root)
+    existing = config_path(root)
+    if existing:
+        evidence["active_layers"] = [layer.as_record() for layer in get_registry().ordered()]
+        evidence["active_utility_id"] = get_registry().utility_id
 
     payload = {
         "schema": "codechakra/propose-layers-request@1",
@@ -637,10 +572,13 @@ def generate_propose_request(root_dir: str = ".") -> str:
             "Analyze the repository evidence and propose a dynamic architectural layer set tailored to this codebase.",
             "Each layer must have: id (unique machine string), name (display string), order (1..N), description, and rules.",
             "Rules support: file_contains, exclude_file, path_regex, label_contains, exclude_label, label_ends_with, type_in, id_prefix.",
-            "Must designate a utility_id matching one of the proposed layer ids (the fallback catch-all bucket).",
-            f"Write the JSON or YAML response to .tldrgraph/{RESPONSE_FILENAME}, then run `tldrgraph apply-layers`.",
+            "Must designate a utility_id matching one of the proposed layer ids (the catch-all bucket, with empty rules).",
+            "Name the layers after THIS repository's concepts. TLDRGraph ships no layer templates and none will be applied for you.",
+            "A rule that matches nothing is worse than no rule; a rule that matches everything collapses the map.",
+            "See 'layer_set_ideas' below for the SHAPE of an answer. They are sketches from other codebases, not a menu -- none of them fits this repository.",
+            f"Write the JSON or YAML response to .tldrgraph/{RESPONSE_FILENAME}, then run `tldrgraph init`.",
         ],
-        "suggested_archetype_layers": archetype_example,
+        "layer_set_ideas": LAYER_SET_IDEAS,
         "evidence": evidence,
     }
 

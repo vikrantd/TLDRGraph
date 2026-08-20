@@ -128,7 +128,11 @@ def test_bridge_is_created_on_a_completely_fresh_scan(mini_repo, stub_enricher, 
     target_label = mini_repo.label("svc_pension")  # "PensionCalculatorService"
     stub_enricher(lambda n: [target_label] if n["id"] == ui else [])
 
-    assert not mini_repo.tldrgraph_dir.exists(), "fixture directory must be fresh"
+    # The state directory now also holds graphify's raw export, so its mere
+    # existence proves nothing. What must be absent is TLDRGraph's own state.
+    assert not mini_repo.snapshot_path.exists(), "snapshot must be fresh"
+    assert not mini_repo.index_path.exists(), "vector index must be fresh"
+    assert not mini_repo.db_path.exists(), "hash-gate cache must be fresh"
 
     loader = GraphLoader(str(mini_repo.root))
     graph = loader.load_or_extract(enrich_llm=True)

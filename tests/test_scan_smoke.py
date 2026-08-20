@@ -10,6 +10,7 @@ a populated graph, expose all six layers, and write ``layers.yaml``.
 
 import yaml
 
+from tldrgraph import paths
 from tldrgraph.classifier import LayerType
 
 
@@ -82,16 +83,16 @@ def test_ast_edges_from_graphify_survive_the_scan(loader, mini_repo, no_network)
 
 
 def test_auto_graphify_run_when_graph_json_missing(tmp_path, no_network):
-    """When graphify-out/graph.json is missing, GraphLoader invokes graphify automatically."""
+    """When graphify's raw export is missing, GraphLoader invokes graphify automatically."""
     from tldrgraph.graph_loader import GraphLoader
     src_file = tmp_path / "sample.py"
     src_file.write_text("def hello():\n    return 42\n\ndef caller():\n    return hello()\n", encoding="utf-8")
 
     loader = GraphLoader(str(tmp_path))
-    assert not (tmp_path / "graphify-out" / "graph.json").exists()
+    assert not (tmp_path / paths.STATE_DIRNAME / paths.GRAPHIFY_GRAPH_FILENAME).exists()
 
     graph = loader.load_or_extract(enrich_llm=False)
-    assert (tmp_path / "graphify-out" / "graph.json").exists()
+    assert (tmp_path / paths.STATE_DIRNAME / paths.GRAPHIFY_GRAPH_FILENAME).exists()
     assert graph.number_of_nodes() > 0
     assert any("hello" in n or "caller" in n for n in graph.nodes)
 

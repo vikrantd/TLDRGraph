@@ -1,18 +1,21 @@
 """
 Agent Installer for TLDRGraph.
 
-Writes host-agent rules for the three coding agents that actually drive the
-enrichment loop, plus the agent contract they all point at:
+Writes the two things a repository needs to be agent-ready:
 
-    <root>/.tldrgraph/AGENT_CONTRACT.md      -- the request/response schema
-    <root>/.claude/skills/codechakra/SKILL.md -- Claude Code skill
-    <root>/CLAUDE.md                          -- delimited TLDRGraph section
-    <root>/.cursor/rules/tldrgraph.mdc       -- Cursor project rule
-    <root>/.agents/rules/tldrgraph.md        -- Antigravity rule
-    <root>/.agents/workflows/tldrgraph.md    -- Antigravity workflow
+    <root>/.tldrgraph/AGENT_CONTRACT.md   -- the request/response schema
+    <root>/.gitignore                     -- managed block for generated state
 
-Every write is idempotent: unchanged files are left alone, and CLAUDE.md is
-*never* clobbered -- only the region between the TLDRGraph markers is replaced.
+plus the per-tool instruction and command files, which live in
+:mod:`.agent_commands` so that every agent gets byte-identical content.
+
+This module used to generate five differently-worded rule files -- a Claude
+skill, a CLAUDE.md section, a Cursor rule, an Antigravity rule and an Antigravity
+workflow. They drifted apart immediately. There is now one body of instructions
+and one command, written to whatever paths each tool uses.
+
+Every write is idempotent: unchanged files are left alone, and user-owned files
+are *never* clobbered -- only the region between the TLDRGraph markers changes.
 """
 
 from __future__ import annotations
@@ -20,12 +23,36 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
+from .agent_commands import install_agent_commands, remove_superseded
 from .layer_config import load_layer_config
 from .layers import LayerRegistry, get_registry
 
 #: Delimiters for the managed region inside a user-owned CLAUDE.md.
 CLAUDE_MD_BEGIN = "<!-- BEGIN TLDRGRAPH -->"
 CLAUDE_MD_END = "<!-- END TLDRGRAPH -->"
+
+#: Delimiters for the managed region inside a user-owned .gitignore.
+GITIGNORE_BEGIN = "# BEGIN TLDRGRAPH"
+GITIGNORE_END = "# END TLDRGRAPH"
+
+#: Files inside .tldrgraph/ that are worth committing: the contract every agent
+#: reads, and the layer map, so a teammate's scan classifies the code the same
+#: way instead of re-deriving its own.
+GITIGNORE_KEEP = ("AGENT_CONTRACT.md", "layers.config.yaml")
+
+#: The managed .gitignore body.
+#:
+#: `.tldrgraph/*` rather than `.tldrgraph/` is load-bearing: git never descends
+#: into an excluded *directory*, so a trailing-slash ignore makes the negations
+#: below unreachable. Excluding the directory's *entries* keeps them working.
+GITIGNORE_BLOCK = "\n".join(
+    [
+        "# TLDRGraph analysis state. Generated artifacts are ignored; the agent",
+        "# contract and layer map are committed so the whole team shares them.",
+        ".tldrgraph/*",
+    ]
+    + [f"!.tldrgraph/{name}" for name in GITIGNORE_KEEP]
+)
 
 #: Where the contract is installed inside a target repository.
 CONTRACT_REL_PATH = os.path.join(".tldrgraph", "AGENT_CONTRACT.md")
@@ -53,12 +80,27 @@ def generate_layers_prose(registry: Optional[LayerRegistry] = None) -> str:
     return "\n".join(lines)
 
 
-_LOOP = """```bash
+_LOOP = """One command does everything -- layers, extraction, enrichment -- and is resumable:
+
+```bash
+tldrgraph init          # prints a NEXT ACTION block whenever it needs you
+# do exactly what that block says (design layers, or read source and write intents)
+tldrgraph init --yes    # run it again; repeat until it prints status: done
+```
+
+`init` never guesses. It has no template to fall back on, so if this repository has no
+architecture yet it stops and asks you to design one from the code. When it needs
+enrichment it hands you a batch, and you OPEN THE SOURCE FILES before writing anything.
+
+The underlying steps stay available for scripting:
+
+```bash
 tldrgraph queue-enrichment --limit 50   # writes .tldrgraph/enrichment_request.yaml
-# read the request, OPEN THE SOURCE FILES, write .tldrgraph/enrichment_response.yaml
 tldrgraph apply-enrichment              # merges intents + bridge edges into the graph
-tldrgraph queue-enrichment --limit 50   # repeat; the queue advances by itself
-```"""
+```
+
+The `/tldrgraph-init` command installed in your agent's command directory is this loop
+written out in full."""
 
 _RULES_SHORT = """- **Read the source file before writing an intent.** You have the repo open -- that is
   the entire reason this path exists. An intent paraphrased from the symbol name is worse
@@ -175,193 +217,9 @@ def _contract_text(registry: Optional[LayerRegistry] = None) -> str:
 # Per-agent payloads
 # --------------------------------------------------------------------------- #
 
-def make_claude_skill(registry: Optional[LayerRegistry] = None) -> str:
-    layers_prose = generate_layers_prose(registry)
-    count = len(registry.ordered()) - 1 if registry else 6
-    return f"""---
-name: codechakra
-description: >-
-  Trace and enrich this repository's {count}-layer architecture graph. Use when asked how a
-  feature flows end to end, which layer a symbol belongs to, what reaches a DB table or
-  endpoint, or when asked to enrich / describe un-enriched TLDRGraph nodes.
----
-
-# TLDRGraph: {count}-Layer Code Flow & Semantic Navigation
-
-{layers_prose}
-
-## Before planning or changing a feature
-
-```bash
-tldrgraph query "<feature in plain English>"    # semantic search + end-to-end flow
-tldrgraph trace "<Source>" "<Target>"           # exact path between two symbols
-tldrgraph layers                                # node counts per layer
-```
-
-`query`, `trace`, `layers` and `dead-code` are read-only: they never fire enrichment.
-`.tldrgraph/layers.yaml` and `.tldrgraph/flows.yaml` hold the exported context.
-
-## Enrichment loop -- this is your job, not an API's
-
-The hosted-LLM path only ever sees a label and a file path. You have the repo open, so
-you are the primary enrichment path.
-
-{_LOOP}
-
-Response format (`.tldrgraph/enrichment_response.json`), a bare JSON array:
-
-{_RESPONSE_SCHEMA}
-
-{_RULES_SHORT}
-
-Full schema: `{CONTRACT_REL_PATH}`.
-
-## dead-code
-
-```bash
-tldrgraph dead-code                  # defaults to --status candidate
-tldrgraph dead-code --status unreviewed --json
-```
-
-{_DEAD_CODE_NOTE}
-"""
-
-
-def make_claude_md_section(registry: Optional[LayerRegistry] = None) -> str:
-    count = len(registry.ordered()) - 1 if registry else 6
-    names = " -> ".join(l.name.split(":")[-1].strip() for l in (registry or get_registry()).ordered() if l.id != (registry or get_registry()).utility_id)
-    return f"""## TLDRGraph ({count}-layer code flow engine)
-
-This repo is mapped by TLDRGraph into {count} architectural layers ({names}). Snapshot: `.tldrgraph/graph.json`, summaries:
-`.tldrgraph/layers.yaml`.
-
-**Before planning or implementing a feature**, trace it rather than grepping:
-
-```bash
-tldrgraph query "<feature in plain English>"
-tldrgraph trace "<Source>" "<Target>"
-```
-
-**When nodes are un-enriched, enrich them yourself** -- you can open the files, the API
-path cannot:
-
-{_LOOP}
-
-Write a bare JSON array of `{{id, intent, fields, calls}}` to the response file.
-{_RULES_SHORT}
-
-Full contract: `{CONTRACT_REL_PATH}`.
-
-`tldrgraph dead-code` lists **review candidates, not confirmed dead code**; `unreviewed`
-means "not enough evidence to conclude" and is never removable. Confirm in the source.
-"""
-
-
-def make_cursor_rule(registry: Optional[LayerRegistry] = None) -> str:
-    layers_prose = generate_layers_prose(registry)
-    count = len(registry.ordered()) - 1 if registry else 6
-    return f"""---
-description: TLDRGraph {count}-layer code flow, semantic navigation, and agent enrichment loop
-globs: ["**/*"]
-alwaysApply: true
----
-
-# TLDRGraph Multi-Layer Code Flow Rules
-
-{layers_prose}
-
-## Navigate before you edit
-
-- Run `tldrgraph query "<feature>"` or `tldrgraph trace "<Source>" "<Target>"` to get
-  the real end-to-end path across layers before planning a change.
-- Read `.tldrgraph/layers.yaml` and `.tldrgraph/flows.yaml` for architectural context.
-- `query`, `trace`, `layers`, `dead-code` are read-only and never trigger enrichment.
-
-## Enrichment loop (you are the primary enrichment path)
-
-{_LOOP}
-
-Response file is a bare JSON array:
-
-{_RESPONSE_SCHEMA}
-
-{_RULES_SHORT}
-
-Full schema: `{CONTRACT_REL_PATH}`.
-
-## dead-code
-
-{_DEAD_CODE_NOTE}
-"""
-
-
-def make_antigravity_rule(registry: Optional[LayerRegistry] = None) -> str:
-    layers_prose = generate_layers_prose(registry)
-    count = len(registry.ordered()) - 1 if registry else 6
-    return f"""---
-description: TLDRGraph {count}-Layer Code Flow & Semantic Navigation Engine
-globs: **/*
----
-
-# TLDRGraph Multi-Layer Code Flow Rules
-
-This project uses TLDRGraph to map full-stack code into {count} layers:
-
-{layers_prose}
-
-## Rules for Antigravity
-
-- Before planning or implementing any feature, run `tldrgraph query "<feature>"` or
-  `tldrgraph trace "<Source>" "<Target>"` to trace exact end-to-end execution paths.
-- Read `.tldrgraph/layers.yaml` and `.tldrgraph/flows.yaml` for architectural context.
-- Un-enriched nodes are enriched by **you**, locally, with no third-party API key:
-
-{_LOOP}
-
-Response file is a bare JSON array:
-
-{_RESPONSE_SCHEMA}
-
-{_RULES_SHORT}
-
-Full schema: `{CONTRACT_REL_PATH}`.
-
-## dead-code
-
-{_DEAD_CODE_NOTE}
-"""
-
-
-def make_antigravity_workflow(registry: Optional[LayerRegistry] = None) -> str:
-    count = len(registry.ordered()) - 1 if registry else 6
-    return f"""---
-name: codechakra
-description: Multi-layer code flow tracing, semantic search, and agent enrichment ({count} Layers)
----
-
-# Workflow: TLDRGraph Flow Engine
-
-1. `tldrgraph scan .` -- refresh AST, layers, and the local vector index.
-2. `tldrgraph query "<feature>"` -- inspect the full {count}-layer execution path.
-3. `tldrgraph layers` -- architectural layer summary.
-4. Enrichment loop, highest-value nodes first:
-
-{_LOOP}
-
-5. `tldrgraph dead-code` -- list review candidates (never a delete list).
-
-Full schema for step 4: `{CONTRACT_REL_PATH}`.
-"""
-
-
-# Legacy module-level aliases for backwards compatibility
+# Legacy module-level aliases for backwards compatibility.
 _LAYERS = generate_layers_prose()
 AGENT_CONTRACT_FALLBACK = make_agent_contract_fallback()
-CLAUDE_SKILL = make_claude_skill()
-CLAUDE_MD_SECTION = make_claude_md_section()
-CURSOR_RULE = make_cursor_rule()
-ANTIGRAVITY_RULE = make_antigravity_rule()
-ANTIGRAVITY_WORKFLOW = make_antigravity_workflow()
 
 
 # --------------------------------------------------------------------------- #
@@ -383,71 +241,164 @@ def _write_if_changed(path: str, content: str) -> bool:
     return True
 
 
-def upsert_delimited_section(existing: Optional[str], section_body: str) -> str:
+def upsert_block(existing: Optional[str], body: str, begin: str, end: str) -> str:
     """
-    Returns ``existing`` with the TLDRGraph-delimited region replaced by
-    ``section_body``, appending the region if it is not present yet.
+    Returns ``existing`` with the region between ``begin`` and ``end`` replaced
+    by ``body``, appending the region if it is not present yet.
     """
-    block = f"{CLAUDE_MD_BEGIN}\n{section_body.strip()}\n{CLAUDE_MD_END}\n"
+    block = f"{begin}\n{body.strip()}\n{end}\n"
 
     if not existing or not existing.strip():
         return block
 
-    start = existing.find(CLAUDE_MD_BEGIN)
-    end = existing.find(CLAUDE_MD_END)
-    if start != -1 and end != -1 and end > start:
+    start = existing.find(begin)
+    stop = existing.find(end)
+    if start != -1 and stop != -1 and stop > start:
         head = existing[:start]
-        tail = existing[end + len(CLAUDE_MD_END):]
-        tail = tail.lstrip("\n")
+        tail = existing[stop + len(end):].lstrip("\n")
         return f"{head}{block}{tail}"
 
     separator = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
     return f"{existing}{separator}{block}"
 
 
-def install_agent_rules(root_dir: str = ".") -> Dict[str, str]:
+def strip_block(existing: str, begin: str, end: str) -> str:
+    """Returns ``existing`` with the managed region and its markers removed."""
+    start = existing.find(begin)
+    stop = existing.find(end)
+    if start == -1 or stop == -1 or stop < start:
+        return existing
+    return (existing[:start].rstrip("\n") + "\n" + existing[stop + len(end):].lstrip("\n")).lstrip("\n")
+
+
+def upsert_delimited_section(existing: Optional[str], section_body: str) -> str:
     """
-    Installs TLDRGraph rules for Claude Code, Cursor and Antigravity, plus the shared
-    agent contract.
+    Returns ``existing`` with the TLDRGraph-delimited region replaced by
+    ``section_body``, appending the region if it is not present yet.
+    """
+    return upsert_block(existing, section_body, CLAUDE_MD_BEGIN, CLAUDE_MD_END)
+
+
+def _neutralize_directory_ignores(text: str) -> str:
+    """
+    Comments out any hand-written ``.tldrgraph`` / ``.tldrgraph/`` line outside
+    the managed block.
+
+    Such a line ignores the *directory*, which stops git descending into it, so
+    the managed block's ``!.tldrgraph/...`` negations could never take effect.
+    The line is commented rather than deleted so the edit is visible and
+    reversible in a diff.
+    """
+    if not text:
+        return text
+
+    out: List[str] = []
+    inside_block = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if stripped == GITIGNORE_BEGIN:
+            inside_block = True
+        elif stripped == GITIGNORE_END:
+            inside_block = False
+        elif not inside_block and stripped.lstrip("/").rstrip("/") == ".tldrgraph" \
+                and not stripped.startswith("#"):
+            out.append(f"# {raw}  # superseded by the TLDRGraph block below")
+            continue
+        out.append(raw)
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
+
+
+def ensure_gitignore(root_dir: str = ".") -> Dict[str, str]:
+    """
+    Adds (or refreshes) TLDRGraph's managed block in the repository's .gitignore.
+
+    Ignores everything generated under ``.tldrgraph/`` while keeping the agent
+    contract and layer map committable. Creates the file if it does not exist.
+    Idempotent: an already-correct .gitignore is left byte-identical.
+
+    Returns ``{"path": ..., "status": created|updated|unchanged}``.
+    """
+    path = os.path.join(os.path.abspath(root_dir), ".gitignore")
+
+    existing: Optional[str] = None
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = f.read()
+        except OSError:
+            existing = None
+
+    updated = upsert_block(
+        _neutralize_directory_ignores(existing or ""), GITIGNORE_BLOCK,
+        GITIGNORE_BEGIN, GITIGNORE_END,
+    )
+
+    if existing == updated:
+        return {"path": path, "status": "unchanged"}
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(updated)
+    except OSError as err:
+        return {"path": path, "status": f"failed: {err}"}
+
+    return {"path": path, "status": "created" if existing is None else "updated"}
+
+
+def install_agent_rules(root_dir: str = ".", all_agents: bool = False) -> Dict[str, str]:
+    """
+    Makes a repository agent-ready: the .gitignore block, the shared contract,
+    and one body of instructions plus one command written to whatever paths each
+    tool uses. No tool gets bespoke prose and no tool gets extra artifacts.
+
+    ``all_agents`` writes for every tool TLDRGraph knows, not just the ones this
+    repository shows signs of using.
     """
     root = os.path.abspath(root_dir)
     registry, _ = load_layer_config(root)
     written: Dict[str, str] = {}
+
+    # 0a. Keep generated state out of git, but leave the contract and layer map
+    #     committable so the team shares one architecture definition.
+    written["gitignore"] = ensure_gitignore(root)["path"]
 
     # 0. The contract every rule file points at.
     contract_path = os.path.join(root, CONTRACT_REL_PATH)
     _write_if_changed(contract_path, _contract_text(registry))
     written["contract"] = contract_path
 
-    # 1. Claude Code -- skill + a delimited section in CLAUDE.md.
-    skill_path = os.path.join(root, ".claude", "skills", "tldrgraph", "SKILL.md")
-    _write_if_changed(skill_path, make_claude_skill(registry))
-    written["claude_skill"] = skill_path
+    # 1. The instructions and the command, identical for every tool, at
+    #    whatever paths each one uses. See agent_commands.TARGETS.
+    written.update(install_agent_commands(root, all_agents=all_agents))
 
+    # 2. Remove what earlier versions installed. Left behind, those files
+    #    describe a workflow that no longer exists.
+    removed = remove_superseded(root)
+
+    # 3. Our managed block inside a user-owned CLAUDE.md is superseded by
+    #    AGENTS.md, which Claude Code also reads. Drop the block, keep whatever
+    #    the user wrote around it, and delete the file only if we created it and
+    #    nothing else is left.
     claude_md_path = os.path.join(root, "CLAUDE.md")
-    existing = None
     if os.path.isfile(claude_md_path):
         try:
             with open(claude_md_path, "r", encoding="utf-8") as f:
                 existing = f.read()
         except OSError:
             existing = None
-    _write_if_changed(claude_md_path, upsert_delimited_section(existing, make_claude_md_section(registry)))
-    written["claude_md"] = claude_md_path
+        if existing and CLAUDE_MD_BEGIN in existing:
+            remainder = strip_block(existing, CLAUDE_MD_BEGIN, CLAUDE_MD_END)
+            if remainder.strip():
+                _write_if_changed(claude_md_path, remainder)
+            else:
+                try:
+                    os.remove(claude_md_path)
+                    removed.append("CLAUDE.md")
+                except OSError:
+                    pass
 
-    # 2. Cursor project rule.
-    cursor_path = os.path.join(root, ".cursor", "rules", "tldrgraph.mdc")
-    _write_if_changed(cursor_path, make_cursor_rule(registry))
-    written["cursor_rule"] = cursor_path
-
-    # 3. Antigravity rule + workflow.
-    antigravity_rule = os.path.join(root, ".agents", "rules", "tldrgraph.md")
-    _write_if_changed(antigravity_rule, make_antigravity_rule(registry))
-    written["antigravity_rule"] = antigravity_rule
-
-    antigravity_workflow = os.path.join(root, ".agents", "workflows", "tldrgraph.md")
-    _write_if_changed(antigravity_workflow, make_antigravity_workflow(registry))
-    written["antigravity_workflow"] = antigravity_workflow
+    if removed:
+        written["superseded (removed)"] = ", ".join(removed)
 
     return written
 
@@ -463,8 +414,11 @@ def gitignore_warnings(root_dir: str = ".") -> List[str]:
     except OSError:
         return []
 
+    # `.tldrgraph` is deliberately absent: ensure_gitignore now manages it with
+    # negations that keep the contract and layer map committable, so warning
+    # about it would contradict what this installer just wrote.
     watched = {".agents": ".agents/", ".claude": ".claude/", ".cursor": ".cursor/",
-               ".tldrgraph": ".tldrgraph/", "CLAUDE.md": "CLAUDE.md"}
+               "CLAUDE.md": "CLAUDE.md"}
     warnings: List[str] = []
     for lineno, raw in enumerate(lines, 1):
         entry = raw.strip()

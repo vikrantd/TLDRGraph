@@ -14,10 +14,9 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 import yaml
 
 from .layers import (
-    DEFAULT_LAYERS,
     LAYER_UTILITY,
     LayerRegistry,
-    default_registry,
+    bootstrap_registry,
     set_registry,
 )
 from .rules import Rule
@@ -121,12 +120,18 @@ def load_layer_config(root_dir: str = ".") -> Tuple[LayerRegistry, str]:
     Loads the layer configuration from .tldrgraph/layers.config.yaml (or .json).
 
     If found, validates and sets the active registry.
-    If absent, falls back to the default registry.
+
+    If absent, returns the single-bucket bootstrap registry. It deliberately does
+    NOT fall back to a plausible six-layer default: classifying a repository
+    against an architecture nobody derived from it produces a map that is wrong
+    everywhere it looks right. `tldrgraph init` stops and asks instead.
+
     Returns (registry, config_hash).
     """
     c_path = config_path(root_dir)
     if not c_path:
-        reg = default_registry()
+        reg = bootstrap_registry()
+        set_registry(reg)
         return reg, compute_registry_hash(reg)
 
     try:
@@ -150,13 +155,17 @@ def save_layer_config(root_dir: str, registry: LayerRegistry) -> str:
     """
     Persists a LayerRegistry into .tldrgraph/layers.config.yaml.
 
+    Every config that reaches this function was derived from the repository's
+    own source -- there is no template path any more -- so nothing here needs to
+    mark a config as second-class.
+
     Returns the written file path.
     """
     out_dir = os.path.join(os.path.abspath(root_dir), ".tldrgraph")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, CONFIG_FILENAME_YAML)
 
-    payload = {
+    payload: Dict[str, Any] = {
         "version": CONFIG_SCHEMA_VERSION,
         "utility_id": registry.utility_id,
         "layers": [layer.as_record() for layer in registry.ordered()],

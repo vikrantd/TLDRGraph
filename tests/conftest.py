@@ -2,7 +2,7 @@
 Hermetic fixtures for the TLDRGraph regression suite.
 
 Everything the tests touch lives under pytest's ``tmp_path``. Nothing here reads
-the real repository, the real ``graphify-out/`` directory, or the real
+the real repository, the real ``.tldrgraph/`` state directory, or the real
 ``.tldrgraph/`` state, and nothing makes a network call.
 """
 
@@ -30,8 +30,24 @@ if _PKG_PARENT in sys.path:
     sys.path.remove(_PKG_PARENT)
 sys.path.insert(0, _PKG_PARENT)
 
+from tldrgraph import paths  # noqa: E402
 from tldrgraph.classifier import LayerType  # noqa: E402
 from tldrgraph.graph_loader import GraphLoader  # noqa: E402
+from tldrgraph.layer_config import save_layer_config  # noqa: E402
+from tldrgraph.layers import DEFAULT_LAYERS, LayerRegistry  # noqa: E402
+
+
+def write_example_layer_config(root) -> str:
+    """
+    Installs the worked-example layer set into a fixture repository.
+
+    Production ships no layer templates: an unconfigured repo gets a single
+    "Unclassified" bucket, because classifying against an architecture nobody
+    derived from the code is worse than not classifying at all. Tests that
+    exercise the rule engine therefore have to say which layer set they mean,
+    and DEFAULT_LAYERS is the known one the fixture nodes were written against.
+    """
+    return save_layer_config(str(root), LayerRegistry(DEFAULT_LAYERS))
 
 
 # ---------------------------------------------------------------------------
@@ -197,19 +213,20 @@ class MiniRepo:
     # -- convenience -------------------------------------------------------
     @property
     def graphify_dir(self) -> Path:
-        return self.root / "graphify-out"
+        # graphify's raw export now lives inside the single state directory.
+        return self.tldrgraph_dir
 
     @property
     def graph_json(self) -> Path:
-        return self.graphify_dir / "graph.json"
+        return self.graphify_dir / paths.GRAPHIFY_GRAPH_FILENAME
 
     @property
     def manifest_json(self) -> Path:
-        return self.graphify_dir / "manifest.json"
+        return self.graphify_dir / paths.GRAPHIFY_MANIFEST_FILENAME
 
     @property
     def tldrgraph_dir(self) -> Path:
-        return self.root / ".tldrgraph"
+        return self.root / paths.STATE_DIRNAME
 
     @property
     def snapshot_path(self) -> Path:
@@ -254,6 +271,25 @@ class MiniRepo:
 
 
 @pytest.fixture(autouse=True)
+def baseline_registry():
+    """
+    Starts every test from the worked-example layer set.
+
+    ``load_layer_config`` installs whatever it finds on disk, so a test that
+    builds a graph leaves the process-wide registry pointing at that repo's
+    layers and the next test inherits it. Restoring afterwards is not enough --
+    that just propagates whatever the previous test left. Resetting up front is.
+
+    Production starts from :func:`bootstrap_registry` instead (one Unclassified
+    bucket); that behaviour is asserted directly in test_layer_config.
+    """
+    from tldrgraph.layers import default_registry, set_registry
+
+    set_registry(default_registry())
+    return True
+
+
+@pytest.fixture(autouse=True)
 def env_no_llm(monkeypatch):
     """
     Force the deterministic offline path.
@@ -261,6 +297,10 @@ def env_no_llm(monkeypatch):
     Clears every provider key the enricher looks at and points OLLAMA_HOST at a
     port nothing listens on, so ``_call_ollama`` fails immediately with
     connection-refused instead of reaching the network.
+
+    Also switches off the agent-CLI path. A developer machine usually has
+    ``claude`` or ``gemini`` on PATH, and a test suite must never spend a real
+    agent's tokens; tests that exercise that path opt back in explicitly.
     """
     for var in (
         "GEMINI_API_KEY",
@@ -271,6 +311,7 @@ def env_no_llm(monkeypatch):
         monkeypatch.delenv(var, raising=False)
     # Port 9 (discard) on loopback: refused instantly, never leaves the host.
     monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:9")
+    monkeypatch.setenv("TLDRGRAPH_NO_AGENT", "1")
     return True
 
 
@@ -278,8 +319,9 @@ def env_no_llm(monkeypatch):
 def mini_repo(tmp_path, env_no_llm) -> MiniRepo:
     """Materialize a hermetic mini-repo with graphify output + real sources."""
     root = tmp_path / "minirepo"
-    graphify = root / "graphify-out"
+    graphify = root / paths.STATE_DIRNAME
     graphify.mkdir(parents=True)
+    write_example_layer_config(root)
 
     # 1. Real source files on disk (so the sha256 fallback path is reachable).
     for rel, content in FILE_CONTENTS.items():
@@ -287,7 +329,7 @@ def mini_repo(tmp_path, env_no_llm) -> MiniRepo:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
 
-    # 2. graphify-out/graph.json
+    # 2. graphify's raw AST export
     nodes = []
     for key, (label, src, loc, ftype, community, _layer) in NODE_SPECS.items():
         nodes.append(
@@ -330,9 +372,9 @@ def mini_repo(tmp_path, env_no_llm) -> MiniRepo:
         "hyperedges": [],
         "built_at_commit": "0000000",
     }
-    (graphify / "graph.json").write_text(json.dumps(graph_doc, indent=2), encoding="utf-8")
+    (graphify / paths.GRAPHIFY_GRAPH_FILENAME).write_text(json.dumps(graph_doc, indent=2), encoding="utf-8")
 
-    # 3. graphify-out/manifest.json -- one entry per source_file.
+    # 3. graphify's manifest -- one entry per source_file.
     now = time.time()
     manifest = {}
     for rel, content in FILE_CONTENTS.items():
@@ -342,7 +384,7 @@ def mini_repo(tmp_path, env_no_llm) -> MiniRepo:
             "ast_hash": _hash("ast:" + content),
             "semantic_hash": _hash("sem:" + content),
         }
-    (graphify / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    (graphify / paths.GRAPHIFY_MANIFEST_FILENAME).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     return MiniRepo(root)
 

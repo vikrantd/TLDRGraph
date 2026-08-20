@@ -10,7 +10,7 @@ import yaml
 import networkx as nx
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple, Optional, Set
-from . import __version__, extractors
+from . import __version__, extractors, paths
 from .classifier import classify_node, classify_node_with_source
 from .layer_config import load_layer_config, compute_registry_hash
 from .layers import (
@@ -66,8 +66,16 @@ def bridge_score_floor(vector_store: LocalVectorStore) -> float:
 #: Schema version of .tldrgraph/graph.json
 SNAPSHOT_SCHEMA_VERSION = 1
 
-#: Filename of the persisted TLDRGraph graph snapshot (inside .tldrgraph/).
-SNAPSHOT_FILENAME = "graph.json"
+#: Canonical on-disk layout, re-exported so existing importers keep working.
+#: :mod:`tldrgraph.paths` is the single source of truth -- see its docstring for
+#: why graphify's export is renamed rather than dropped in as ``graph.json``.
+SNAPSHOT_FILENAME = paths.SNAPSHOT_FILENAME
+STATE_DIRNAME = paths.STATE_DIRNAME
+GRAPHIFY_GRAPH_FILENAME = paths.GRAPHIFY_GRAPH_FILENAME
+GRAPHIFY_MANIFEST_FILENAME = paths.GRAPHIFY_MANIFEST_FILENAME
+LEGACY_GRAPHIFY_DIRNAME = paths.LEGACY_GRAPHIFY_DIRNAME
+graphify_graph_path = paths.graphify_graph_path
+graphify_manifest_path = paths.graphify_manifest_path
 
 
 def placeholder_summary(layer: str, label: str, file_path: str) -> str:
@@ -259,10 +267,10 @@ class GraphLoader:
 
     def _load_file_hashes(self) -> Dict[str, str]:
         """
-        Loads graphify-out/manifest.json into {repo_relative_path: content_hash}.
+        Loads graphify's file manifest into {repo_relative_path: content_hash}.
         Prefers semantic_hash and falls back to ast_hash.
         """
-        manifest_path = os.path.join(self.root_dir, "graphify-out", "manifest.json")
+        manifest_path = graphify_manifest_path(self.root_dir)
         if not os.path.exists(manifest_path):
             return {}
         try:
@@ -533,7 +541,7 @@ class GraphLoader:
 
     def _run_graphify(self) -> str:
         """
-        Runs graphify AST extraction and builds graphify-out/graph.json.
+        Runs graphify AST extraction into the .tldrgraph state directory.
         TLDRGraph relies directly on graphify as the core extraction engine.
         """
         from pathlib import Path
@@ -544,9 +552,9 @@ class GraphLoader:
         from graphify.export import to_json
 
         root_path = Path(self.root_dir).resolve()
-        out_dir = root_path / "graphify-out"
+        out_dir = root_path / STATE_DIRNAME
         out_dir.mkdir(parents=True, exist_ok=True)
-        graph_json_path = out_dir / "graph.json"
+        graph_json_path = out_dir / GRAPHIFY_GRAPH_FILENAME
 
         det = detect(root_path)
         code_files = []
@@ -565,7 +573,7 @@ class GraphLoader:
 
         if det.get("files"):
             try:
-                save_manifest(det["files"], str(out_dir / "manifest.json"), root=root_path)
+                save_manifest(det["files"], str(out_dir / GRAPHIFY_MANIFEST_FILENAME), root=root_path)
             except Exception:
                 pass
 
@@ -576,10 +584,15 @@ class GraphLoader:
     # ------------------------------------------------------------------ #
 
     def load_or_extract(self, enrich_llm: bool = True, rebuild: bool = False) -> nx.DiGraph:
-        graph_json_path = os.path.join(self.root_dir, "graphify-out", "graph.json")
+        graph_json_path = graphify_graph_path(self.root_dir)
 
         if not os.path.exists(graph_json_path):
             self._run_graphify()
+            # The manifest only exists after that first extraction. Without this
+            # reload the first scan signs every node with a raw sha256 while the
+            # second signs it with graphify's semantic_hash -- which would mark
+            # the entire graph dirty on scan #2 and re-enrich all of it.
+            self.file_hashes = self._load_file_hashes()
 
         # Reload latest layer config from disk / environment
         self.registry, self.layers_config_hash = load_layer_config(self.root_dir)

@@ -2,9 +2,10 @@
 
 **Audience: the coding agent with this repository open** (Claude Code, Cursor, Antigravity).
 
-TLDRGraph builds a 6-layer architectural graph from the graphify AST export. Structure
-*within* a layer, and the high-volume deterministic seams between layers, are extracted
-automatically. What cannot be extracted automatically is:
+TLDRGraph builds an architectural graph from the graphify AST export. The layer set
+itself is designed by you, reading this repository. TLDRGraph ships no layer templates.
+Structure *within* a layer, and the high-volume deterministic seams between layers, are
+extracted automatically. What cannot be extracted automatically is:
 
 - indirect dispatch, queue / event hops, dynamically-built routes;
 - the natural-language **intent** that makes semantic search work at all.
@@ -12,6 +13,34 @@ automatically. What cannot be extracted automatically is:
 That is your job. You are not a fallback for a hosted model — you are the primary
 enrichment path, because **you can open the files**. The API path only ever sees a label
 and a path (`snippet` is never populated), so it guesses. You do not have to guess.
+
+---
+
+## Start here: `tldrgraph init`
+
+One command does everything, and it is resumable:
+
+```bash
+tldrgraph init
+```
+
+It runs every deterministic step — extraction, classification, indexing, applying whatever
+you last wrote — then stops with a `NEXT ACTION` block the moment it needs judgement only
+you can supply. Do what the block says and run it again. Repeat until `status: done`.
+
+| status | what it wants |
+| --- | --- |
+| `needs_layers` | Read the code and design this repository's architecture. **TLDRGraph ships no layer templates**; nothing will be applied for you. The request carries sketches of how other kinds of codebase divide — for shape only, never to copy. |
+| `needs_confirmation` | Enrichment costs the user tokens. Show them the estimate and ask. Then `tldrgraph init --yes`. |
+| `needs_enrichment` | A batch to open, read and describe, per the schema below. |
+| `done` | Nothing left. Use `query` / `trace` / `layers`. |
+
+`--json` gives you the same thing machine-readably. The sections below document the file
+formats `init` reads and writes; the underlying `queue-enrichment` / `apply-enrichment`
+commands remain available for scripting.
+
+**Copy every `id` verbatim from the request.** A constructed id matches nothing, is
+dropped, and will be reported back to you — but the work is wasted.
 
 ---
 
@@ -213,7 +242,7 @@ It then records the ids in the cursor so the next `queue-enrichment` moves on.
 ## Related commands
 
 ```bash
-tldrgraph scan .                       # rebuild layers + index from graphify-out/
+tldrgraph init                         # everything, resumable (scan/enrich are aliases)
 tldrgraph query "pension approval"     # semantic search + end-to-end flow trace
 tldrgraph trace AaoDeskView pension_cases
 tldrgraph layers                       # node counts per layer

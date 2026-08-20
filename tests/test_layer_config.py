@@ -343,3 +343,24 @@ def test_enrichment_survives_layer_set_change(mini_repo):
     assert g3.nodes[case_view]["fields"] == ["caseId", "pensionerName"]
     assert g3.has_edge(case_view, pension_calc)
     assert g3[case_view][pension_calc]["relation"] == "cross_layer_link"
+
+
+def test_an_unconfigured_repo_gets_one_honest_bucket_not_six_guesses(tmp_path):
+    """
+    HARD GATE. `load_layer_config` used to hand back a six-layer
+    UI/API/Service/Data/Async/DevOps default when no config existed, so every
+    node in an unscanned repo was confidently filed into an architecture nobody
+    had derived from it. A map that is wrong everywhere it looks right is worse
+    than no map.
+    """
+    registry, _ = load_layer_config(str(tmp_path))
+
+    assert len(registry) == 1
+    assert registry.ordered()[0].name == "Unclassified"
+    assert registry.utility_id == registry.ordered()[0].id
+    assert registry.ordered()[0].rules == ()
+
+
+def test_the_example_layer_set_is_never_written_to_disk(tmp_path):
+    load_layer_config(str(tmp_path))
+    assert not (tmp_path / ".tldrgraph" / "layers.config.yaml").exists()

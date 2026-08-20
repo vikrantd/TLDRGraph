@@ -29,6 +29,8 @@ __all__ = [
     "LAYER_DEVOPS",
     "LAYER_UTILITY",
     "DEFAULT_LAYERS",
+    "BOOTSTRAP_LAYERS",
+    "bootstrap_registry",
     "default_registry",
     "get_registry",
     "set_registry",
@@ -156,7 +158,13 @@ _DEFAULT_DEVOPS_RULES: Tuple[Rule, ...] = (
     Rule(file_contains=_DEVOPS_KEYWORDS),
 )
 
-#: The built-in default layer set.
+#: A worked example of a layer set, for a full-stack web app.
+#:
+#: **Nothing applies this to a repository.** TLDRGraph classifies only against a
+#: layer set an agent designed from the code in front of it; a generic set looks
+#: plausible, classifies badly, and quietly becomes the answer. This is kept as
+#: a reference for the shape of a `Layer` and as documentation of the well-known
+#: role ids below, nothing more.
 DEFAULT_LAYERS: Tuple[Layer, ...] = (
     Layer(LAYER_UI, "Layer 1: UI Trigger", 1,
           "React components, forms, buttons", _DEFAULT_UI_RULES),
@@ -304,12 +312,37 @@ class LayerRegistry:
         return self.id_for_name(str(node_data.get("layer") or ""))
 
 
+#: The layer every node lands in before an agent has designed anything.
+#:
+#: One honest bucket, not six confident guesses: a node here is visibly
+#: unclassified, which is what it actually is.
+BOOTSTRAP_LAYERS: Tuple[Layer, ...] = (
+    Layer(LAYER_UTILITY, "Unclassified", 1,
+          "No architecture designed yet -- run `tldrgraph init`", ()),
+)
+
+
+def bootstrap_registry() -> LayerRegistry:
+    """
+    The single-bucket registry used until a real layer set exists.
+
+    Everything in the codebase needs *a* registry to read, so there has to be
+    one before `init` has run. What there must not be is a plausible-looking one.
+    """
+    return LayerRegistry(BOOTSTRAP_LAYERS)
+
+
 def default_registry() -> LayerRegistry:
-    """A fresh registry over the built-in default layer set."""
+    """
+    A fresh registry over :data:`DEFAULT_LAYERS`, the worked example.
+
+    Retained for tests and external callers that reference the example set. It
+    is not what an unconfigured repository gets -- see :func:`bootstrap_registry`.
+    """
     return LayerRegistry(DEFAULT_LAYERS)
 
 
-_ACTIVE_REGISTRY: LayerRegistry = default_registry()
+_ACTIVE_REGISTRY: LayerRegistry = bootstrap_registry()
 
 
 def get_registry() -> LayerRegistry:

@@ -73,7 +73,7 @@ from .layers import (
     get_registry,
     layer_name,
 )
-from . import extractors
+from . import extractors, paths
 
 #: Version of the structure returned by :func:`build_multilayer_hierarchy`.
 #: Phase 4's visualizer is written against this contract.
@@ -200,7 +200,7 @@ def build_multilayer_hierarchy(root_dir: str = ".") -> Dict[str, Any]:
     # Load base AST graph if available
     graph_json_path = os.path.join(root_dir, ".tldrgraph", "graph.json")
     if not os.path.exists(graph_json_path):
-        graph_json_path = os.path.join(root_dir, "graphify-out", "graph.json")
+        graph_json_path = paths.graphify_graph_path(root_dir)
 
     ast_nodes: List[Dict[str, Any]] = []
     ast_edges: List[Dict[str, Any]] = []

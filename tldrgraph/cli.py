@@ -2,12 +2,13 @@
 CLI Entry Point for TLDRGraph: Multi-layer code flow & hybrid semantic search engine.
 """
 
+import contextlib
 import os
 import json
 import yaml
 import click
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .graph_loader import (
     GraphLoader,
@@ -16,16 +17,17 @@ from .graph_loader import (
     resolve_call_target,
 )
 from .flow_engine import FlowEngine
-from .installer import install_agent_rules, gitignore_warnings
+from .installer import ensure_gitignore, install_agent_rules, gitignore_warnings
 from .visualizer import generate_visualizer_html
 from .layers import get_registry, layer_id_of
+from .layer_config import config_path
 from .propose_layers import (
+    RESPONSE_FILENAME as PROPOSE_RESPONSE_FILENAME,
     auto_configure_layers,
     generate_propose_request,
     apply_proposed_layers,
-    detect_repository_archetype,
-    propose_layers_with_llm,
 )
+from . import agent_runner, paths
 from . import vector_store as vs_mod
 
 #: Shared option for the retrieval-backend policy. ``off`` (default) is pure
@@ -39,9 +41,10 @@ embeddings_option = click.option(
 )
 
 try:  # provenance tag written by the offline template enricher
-    from .deadcode import HEURISTIC_ENRICHMENT_SOURCE
+    from .deadcode import HEURISTIC_ENRICHMENT_SOURCE, NON_CODE_NODE_TYPES
 except ImportError:  # pragma: no cover - deadcode module is optional
     HEURISTIC_ENRICHMENT_SOURCE = "heuristic"
+    NON_CODE_NODE_TYPES = {"rationale", "concept", "doc", "documentation"}
 
 #: Provenance stamped on nodes enriched through the host-agent loop.
 AGENT_ENRICHMENT_SOURCE = "agent"
@@ -193,8 +196,17 @@ def needs_agent_enrichment(data: Dict[str, Any]) -> bool:
     An intent produced by the offline template heuristic does not count: it is derived
     from the label and layer alone, without reading a single line of source, which is
     exactly the gap this loop exists to close.
+
+    Two kinds of node are excluded outright. The utility bucket is a catch-all
+    rather than an architectural layer. And graphify's prose nodes -- ``rationale``
+    and friends, whose *label is already a sentence of documentation* -- are not
+    symbols at all: asking an agent to describe one means paying it to copy a
+    docstring back onto itself. ``deadcode`` already calls these "not source
+    code"; the same set is reused here so the two cannot disagree.
     """
     if layer_id_of(data) == get_registry().utility_id:
+        return False
+    if str(data.get("type") or "").lower() in NON_CODE_NODE_TYPES:
         return False
     source = data.get("enrichment_source") or ""
     if source == AGENT_ENRICHMENT_SOURCE:
@@ -231,6 +243,381 @@ def _enrichment_candidates(loader: GraphLoader, degrees: Dict[str, Tuple[int, in
     return candidates
 
 
+#: Instructions embedded in every enrichment request. Shared by the file-based
+#: handshake and the headless-agent prompt so both describe the same contract.
+def _enrichment_instructions() -> List[str]:
+    return [
+        "Open and READ each node's source file before writing its intent - you have the repo.",
+        "Write 'intent' in Markdown (single-line summary or rich multiline markdown). Add as much context as needed.",
+        "In 'input_fields', list input arguments, parameters, payload attributes, or request body fields.",
+        "In 'output_fields', list return values, response schemas, emitted event names, or mutated state fields.",
+        "In 'calls', specify exact downstream targets: node ID, file:symbol (e.g. 'src/services/calc.ts:calculate'), file path, or symbol name.",
+        "When multiple methods share the same name across files, use 'file_path:method' or exact node 'id' to ensure precise linking.",
+        "Never invent fields or calls - omit what you cannot verify in the source. An empty list is a correct answer.",
+        "Copy each 'id' verbatim.",
+    ]
+
+
+def build_enrichment_batch(
+    path: str,
+    loader: GraphLoader,
+    degrees: Dict[str, Tuple[int, int]],
+    limit: int,
+    requeue: bool = False,
+    reset: bool = False,
+    skip_cursor: bool = False,
+) -> Dict[str, Any]:
+    """
+    Selects the next batch of nodes deserving enrichment and builds the request payload.
+
+    ``skip_cursor`` ignores queue bookkeeping entirely, which is what the
+    automatic in-scan loop wants: it applies each batch before asking for the
+    next, so the graph itself is the only progress record it needs.
+
+    Returns a dict with the request ``payload``, the ``batch``, and progress counts.
+    """
+    cursor = {"queued": [], "applied": []} if reset else _read_cursor(path)
+
+    skip: set = set()
+    if not skip_cursor:
+        # Anything already answered in a response file counts as done, even if
+        # apply-enrichment has not run yet.
+        answered = set(cursor["applied"])
+        for filename in (RESPONSE_FILENAME, LEGACY_RESPONSE_FILENAME, "pending_enrichment.yaml", LEGACY_FILENAME):
+            for item in coerce_enrichment_items(_read_payload(_state_path(path, filename))):
+                if item.get("id"):
+                    answered.add(str(item["id"]))
+        skip = set(answered)
+        if not requeue:
+            skip |= set(cursor["queued"])
+
+    candidates = _enrichment_candidates(loader, degrees)
+    total_candidates = len(candidates)
+    pending = [c for c in candidates if c["id"] not in skip]
+
+    batch = pending if limit <= 0 else pending[:limit]
+    for rank, node in enumerate(batch, 1):
+        node["rank"] = rank
+
+    already_enriched = sum(
+        1 for _, d in loader.graph.nodes(data=True)
+        if layer_id_of(d) != get_registry().utility_id and not needs_agent_enrichment(d)
+    )
+    remaining_after = max(len(pending) - len(batch), 0)
+
+    payload = {
+        "schema": "codechakra/enrichment-request@1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "response_file": os.path.join(STATE_DIR, RESPONSE_FILENAME),
+        "contract": os.path.join(STATE_DIR, "AGENT_CONTRACT.md"),
+        "instructions": _enrichment_instructions() + [
+            f"Write a YAML list of {{id, intent, input_fields, output_fields, calls}} to "
+            f"{os.path.join(STATE_DIR, RESPONSE_FILENAME)} (NOT back into this request file).",
+            "Then run: tldrgraph apply-enrichment",
+        ],
+        "ordering": "cross_layer_degree desc, then degree (in+out) desc, then id asc",
+        "progress": {
+            "total_candidates": total_candidates,
+            "already_enriched": already_enriched,
+            "queued_now": len(batch),
+            "remaining_after": remaining_after,
+        },
+        "nodes": batch,
+    }
+
+    return {
+        "payload": payload,
+        "batch": batch,
+        "cursor": cursor,
+        "total_candidates": total_candidates,
+        "already_enriched": already_enriched,
+        "remaining_after": remaining_after,
+    }
+
+
+def apply_enrichment_items(
+    loader: GraphLoader,
+    path: str,
+    items: List[Dict[str, Any]],
+    source_label: str,
+) -> Dict[str, Any]:
+    """
+    Merges enrichment objects into the graph, hash-gate cache and vector index.
+
+    This is the one implementation behind both `apply-enrichment` (file handshake)
+    and the automatic in-scan agent loop, so a bridge edge forged automatically is
+    resolved exactly the same way as one applied by hand.
+
+    Returns stats: applied_ids, unknown_ids, bridges, unresolved, snapshot_path.
+    """
+    floor = bridge_score_floor(loader.vector_store)
+
+    applied_ids: List[str] = []
+    unknown_ids: List[str] = []
+    unresolved: List[str] = []
+    bridges = 0
+
+    for item in items:
+        nid = item.get("id")
+        if not nid:
+            continue
+        nid = str(nid)
+        if not loader.graph.has_node(nid):
+            unknown_ids.append(nid)
+            continue
+
+        node_data = loader.graph.nodes[nid]
+        intent = item.get("intent", "")
+        input_fields = item.get("input_fields", []) or []
+        output_fields = item.get("output_fields", []) or []
+        legacy_fields = item.get("fields", []) or []
+        calls = item.get("calls", []) or []
+
+        # Optional layer_id override from agent
+        override_lid = item.get("layer_id")
+        if override_lid and override_lid in get_registry():
+            node_data["layer_id"] = override_lid
+            node_data["layer"] = get_registry().name(override_lid)
+            node_data["layer_source"] = AGENT_ENRICHMENT_SOURCE
+
+        if intent:
+            node_data["intent"] = intent
+            first_line = intent.strip().split("\n")[0].lstrip("#- *").strip()
+            node_data["summary"] = f"{node_data['layer']}: {node_data['label']} - {first_line or intent}"
+            node_data["enrichment_source"] = AGENT_ENRICHMENT_SOURCE
+
+        if input_fields or output_fields:
+            node_data["input_fields"] = input_fields
+            node_data["output_fields"] = output_fields
+            node_data["fields"] = list(input_fields) + list(output_fields)
+        elif legacy_fields:
+            node_data["input_fields"] = legacy_fields
+            node_data["output_fields"] = []
+            node_data["fields"] = legacy_fields
+
+        fields_dict = {
+            "input_fields": node_data.get("input_fields", []),
+            "output_fields": node_data.get("output_fields", []),
+            "fields": node_data.get("fields", [])
+        }
+        loader.hash_gate.update_node(
+            node_id=nid,
+            file_path=node_data.get("file", ""),
+            content=loader.node_signature(node_data),
+            layer=node_data.get("layer", ""),
+            summary=node_data.get("summary", ""),
+            fields_json=json.dumps(fields_dict),
+            intent=node_data.get("intent", "")
+        )
+
+        for call_target in calls:
+            tgt_id, score = resolve_call_target(
+                loader.graph, loader.vector_store, call_target, nid, floor
+            )
+            if tgt_id:
+                loader.graph.add_edge(
+                    nid, tgt_id,
+                    relation="cross_layer_link",
+                    confidence=float(score)
+                )
+                bridges += 1
+            else:
+                unresolved.append(str(call_target))
+
+        applied_ids.append(nid)
+
+    # Re-index so the applied intents/fields are actually searchable, then persist.
+    loader.vector_store.add_documents(loader.docs_to_index)
+    _stamp_degrees(loader)
+    snapshot_path = loader.save_graph()
+    loader.export_yaml()
+
+    cursor = _read_cursor(path)
+    remaining_queued = [i for i in cursor["queued"] if i not in set(applied_ids)]
+    _write_cursor(path, remaining_queued, cursor["applied"] + applied_ids)
+
+    _append_enrichment_audit(path, items, applied_ids, bridges, unresolved, source_label)
+
+    return {
+        "applied_ids": applied_ids,
+        "unknown_ids": unknown_ids,
+        "bridges": bridges,
+        "unresolved": unresolved,
+        "floor": floor,
+        "snapshot_path": snapshot_path,
+    }
+
+
+def _append_enrichment_audit(
+    path: str,
+    items: List[Dict[str, Any]],
+    applied_ids: List[str],
+    bridges: int,
+    unresolved: List[str],
+    source_label: str,
+) -> None:
+    """Appends one batch to .tldrgraph/enrichment_audit.log. Never raises."""
+    audit_path = _state_path(path, AUDIT_LOG_FILENAME)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    applied = set(applied_ids)
+    try:
+        os.makedirs(os.path.dirname(audit_path) or ".", exist_ok=True)
+        with open(audit_path, "a", encoding="utf-8") as f:
+            f.write(f"\n--- Enrichment Batch Applied: {timestamp} ---\n")
+            f.write(f"Source file: {source_label}\n")
+            f.write(f"Applied nodes ({len(applied_ids)}): {', '.join(applied_ids)}\n")
+            f.write(f"Bridge edges created: {bridges}\n")
+            for item in items:
+                nid = str(item.get("id") or "")
+                if nid in applied:
+                    f.write(f"  • [{nid}] intent:\n    {item.get('intent', '')}\n")
+                    if item.get("input_fields"):
+                        f.write(f"    input_fields: {item.get('input_fields')}\n")
+                    if item.get("output_fields"):
+                        f.write(f"    output_fields: {item.get('output_fields')}\n")
+                    elif item.get("fields"):
+                        f.write(f"    fields: {item.get('fields')}\n")
+                    if item.get("calls"):
+                        f.write(f"    calls: {item.get('calls')}\n")
+            if unresolved:
+                f.write(f"Unresolved call targets: {', '.join(unresolved)}\n")
+    except Exception:
+        pass
+
+
+# --------------------------------------------------------------------------- #
+# Automatic agent enrichment
+# --------------------------------------------------------------------------- #
+
+#: Prompt handed to a headless agent CLI for one enrichment batch.
+AGENT_ENRICH_PROMPT = """You are enriching a code architecture graph for the repository you currently have open.
+
+For each node listed below, OPEN its source file at the given path and read the
+actual implementation before writing anything. An intent paraphrased from the
+symbol name is worse than none: it poisons semantic search with confident noise.
+
+{instructions}
+
+Return ONLY a JSON array, no prose and no markdown fence, of this shape:
+
+[
+  {{
+    "id": "<node id copied verbatim>",
+    "intent": "What this symbol does, why it exists, and its execution logic. Markdown allowed.",
+    "input_fields": ["argument", "payloadField"],
+    "output_fields": ["returnedField", "emittedEvent"],
+    "calls": ["DownstreamService", "src/services/calc.ts:calculate", "some_table"]
+  }}
+]
+
+Include every id exactly once. If a file is unreadable or the symbol is trivial,
+still return the id with a short honest intent and empty field/call lists.
+
+Repository root: {root}
+
+Nodes ({count}):
+{nodes}
+"""
+
+
+def build_agent_enrichment_prompt(root: str, batch: List[Dict[str, Any]]) -> str:
+    """Renders the headless-agent prompt for one enrichment batch."""
+    return AGENT_ENRICH_PROMPT.format(
+        instructions="\n".join(f"- {line}" for line in _enrichment_instructions()),
+        root=root,
+        count=len(batch),
+        nodes=json.dumps(batch, indent=2, default=str),
+    )
+
+
+def run_agent_enrichment(
+    path: str,
+    loader: GraphLoader,
+    agent: Any,
+    batch_size: int = 25,
+    max_nodes: int = 0,
+    model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Drives the full enrich loop against a headless agent CLI until the backlog
+    is empty, applying each batch before requesting the next.
+
+    Progress is durable: every batch is merged, re-indexed and saved as it lands,
+    so an interrupted run keeps everything it already earned.
+    """
+    root = os.path.abspath(path)
+    totals = {"applied": 0, "bridges": 0, "unresolved": 0, "batches": 0, "failed_batches": 0}
+    errors: List[str] = []
+    processed = 0
+
+    while True:
+        degrees = compute_degrees(loader.graph)
+        limit = batch_size
+        if max_nodes:
+            remaining_budget = max_nodes - processed
+            if remaining_budget <= 0:
+                break
+            limit = min(batch_size, remaining_budget)
+
+        request = build_enrichment_batch(path, loader, degrees, limit=limit, skip_cursor=True)
+        batch = request["batch"]
+        if not batch:
+            break
+
+        # Keep the request file current so an interrupted run leaves the host
+        # agent a usable handoff instead of a stale batch.
+        _write_payload(_state_path(path, REQUEST_FILENAME), request["payload"])
+
+        click.echo(f"   🤖 Batch {totals['batches'] + 1}: {len(batch)} node(s) "
+                   f"({request['remaining_after']} left after this)...")
+        try:
+            raw = agent_runner.run_agent_json(
+                agent, build_agent_enrichment_prompt(root, batch), root, model=model
+            )
+        except agent_runner.AgentError as err:
+            totals["failed_batches"] += 1
+            errors.append(str(err))
+            click.echo(f"   ⚠️  {err}")
+            break
+
+        items = coerce_enrichment_items(raw)
+        if not items:
+            totals["failed_batches"] += 1
+            errors.append("agent returned no enrichment objects")
+            click.echo("   ⚠️  Agent returned no enrichment objects; stopping the loop.")
+            break
+
+        batch_ids = {node["id"] for node in batch}
+        stats = apply_enrichment_items(loader, path, items, f"agent:{agent.name}")
+        totals["batches"] += 1
+        totals["applied"] += len(stats["applied_ids"])
+        totals["bridges"] += stats["bridges"]
+        totals["unresolved"] += len(stats["unresolved"])
+        processed += len(batch)
+
+        if not stats["applied_ids"]:
+            # Nothing landed: the agent is answering with ids we do not have.
+            # Looping again would just repeat the same batch forever.
+            errors.append("agent returned ids that are not in the graph")
+            click.echo("   ⚠️  None of the returned ids matched the graph; stopping the loop.")
+            break
+
+        # Progress is measured by nodes leaving the candidate set, not by ids
+        # echoed back. An answer with empty intents applies cleanly yet clears
+        # nothing, and would otherwise re-request the same batch forever.
+        cleared = sum(
+            1 for nid in batch_ids
+            if loader.graph.has_node(nid) and not needs_agent_enrichment(loader.graph.nodes[nid])
+        )
+        if not cleared:
+            errors.append("agent answers left every node still un-enriched")
+            click.echo("   ⚠️  That batch cleared no nodes (empty intents?); stopping the loop.")
+            break
+
+    totals["errors"] = errors
+    return totals
+
+
 def _snapshot_or_graph_nodes(root: str) -> Tuple[List[Dict[str, Any]], str]:
     """
     Node records for read-only commands. Prefers the persisted snapshot (a pure read);
@@ -254,39 +641,390 @@ def cli():
     pass
 
 
-@cli.command()
-@click.argument("path", default=".", type=click.Path(exists=True))
-@click.option("--rebuild", is_flag=True, help="Discard the persisted snapshot and rebuild enrichment from scratch")
-@click.option("--propose-layers", is_flag=True, help="Automatically synthesize and configure new dynamic layers using LLM/archetype")
-@embeddings_option
-def scan(path, rebuild, propose_layers, embeddings):
-    """Scan repository, classify dynamic architectural layers, and build local vector index."""
-    click.echo(f"🔄 [TLDRGraph] Scanning repository at {os.path.abspath(path)}...")
+# --------------------------------------------------------------------------- #
+# `tldrgraph init` -- the one command
+# --------------------------------------------------------------------------- #
 
-    # Auto-configure dynamic layers if no configuration exists or explicitly requested
-    cfg_file = os.path.join(os.path.abspath(path), ".tldrgraph", "layers.config.yaml")
-    if propose_layers or not os.path.isfile(cfg_file):
-        reg, cfg_path, source = auto_configure_layers(path, force=propose_layers)
-        click.echo(f"🏗️  Configured {len(reg)} dynamic architectural layers ({source}) in {cfg_path}")
+#: Statuses `init` can end on. Stable strings: agent command files and any
+#: `--json` consumer branch on these.
+STATUS_DONE = "done"
+STATUS_NEEDS_LAYERS = "needs_layers"
+STATUS_NEEDS_CONFIRMATION = "needs_confirmation"
+STATUS_NEEDS_ENRICHMENT = "needs_enrichment"
 
+#: Written by `init` after it merges a response, so the same answers are never
+#: applied twice on the next run.
+APPLIED_RESPONSE_FILENAME = "enrichment_response.applied.yaml"
+
+
+@contextlib.contextmanager
+def _stdout_to_stderr_if(active: bool):
+    """Redirects stdout to stderr while ``active``, so --json stays parseable."""
+    if not active:
+        yield
+        return
+    import sys
+    with contextlib.redirect_stdout(sys.stderr):
+        yield
+
+
+def _stdin_is_interactive() -> bool:
+    """True when there is a real terminal to prompt on."""
+    try:
+        import sys
+        return bool(sys.stdin and sys.stdin.isatty())
+    except Exception:
+        return False
+
+
+def _emit_status(status: str, phase: str, lines: List[str],
+                 progress: Optional[Dict[str, Any]] = None,
+                 as_json: bool = False) -> None:
+    """
+    Prints the block an agent reads to decide what to do next.
+
+    The format is deliberately dull and greppable: every agent tool, whatever
+    its prompt conventions, can find `status:` and follow the numbered steps.
+    """
+    if as_json:
+        click.echo(json.dumps({
+            "status": status,
+            "phase": phase,
+            "next_action": lines,
+            "progress": progress or {},
+        }, indent=2))
+        return
+
+    rule = "─" * 68
+    click.echo(f"\n{rule}")
+    if status == STATUS_DONE:
+        click.echo("TLDRGRAPH INIT — COMPLETE")
+    else:
+        click.echo("TLDRGRAPH INIT — NEXT ACTION REQUIRED")
+    click.echo(f"status: {status}")
+    click.echo(rule)
+    for line in lines:
+        click.echo(line)
+    click.echo(rule + "\n")
+
+
+def _apply_pending_layer_response(path: str) -> Optional[str]:
+    """
+    Applies .tldrgraph/propose_layers_response.json if the agent has written one.
+
+    Part of the one-command promise: the agent writes the file and runs `init`
+    again, rather than having to remember `tldrgraph apply-layers`.
+    """
+    for filename in (PROPOSE_RESPONSE_FILENAME, "propose_layers_response.yaml"):
+        candidate = _state_path(path, filename)
+        if os.path.isfile(candidate):
+            return apply_proposed_layers(path, candidate)
+    return None
+
+
+def _apply_pending_enrichment_response(path: str, loader: GraphLoader) -> Optional[Dict[str, Any]]:
+    """
+    Merges .tldrgraph/enrichment_response.yaml if the agent has written one,
+    then renames it so a later `init` cannot apply the same answers twice.
+
+    Returns the apply stats, or None when there was nothing to apply.
+    """
+    source = None
+    for filename in (RESPONSE_FILENAME, LEGACY_RESPONSE_FILENAME,
+                     "pending_enrichment.yaml", LEGACY_FILENAME):
+        candidate = _state_path(path, filename)
+        if os.path.isfile(candidate):
+            source = candidate
+            break
+    if not source:
+        return None
+
+    items = coerce_enrichment_items(_read_payload(source))
+    if not items:
+        return None
+
+    stats = apply_enrichment_items(loader, path, items, source)
+    try:
+        os.replace(source, _state_path(path, APPLIED_RESPONSE_FILENAME))
+    except OSError:
+        pass
+    return stats
+
+
+def _init_pipeline(path: str, assume_yes: bool, batch_size: int, max_nodes: int,
+                   rebuild: bool, relayer: bool, agent_cli: bool, agent_model: Optional[str],
+                   embeddings: Optional[str], as_json: bool) -> str:
+    """
+    Layers, extraction and enrichment in one resumable pass.
+
+    Every deterministic step runs here; the moment judgement is needed that only
+    an agent can supply, this stops and prints what to do. Re-running picks up
+    exactly where it left off, so the whole workflow is `init`, act, `init`,
+    act, `init`. Returns the terminal status.
+    """
+    root = os.path.abspath(path)
+
+    if not as_json:
+        click.echo(f"🔄 [TLDRGraph] {root}")
+
+    # 0. Make the repo agent-ready. Idempotent: unchanged files are not touched.
+    ensure_gitignore(path)
+    install_agent_rules(path)
+
+    # 1. Extraction first, so the layer evidence carries real symbols rather
+    #    than a directory listing -- and so we can size the job up front.
+    #
+    #    This runs EVERY time, not just when the export is missing. Reusing an
+    #    existing export means every later phase works from whatever the code
+    #    looked like when it was written: an agent gets handed deleted functions
+    #    to describe, and code added since is invisible. graphify caches per file
+    #    by content hash, so a re-run with nothing changed is nearly free.
     loader = GraphLoader(path, embeddings=embeddings)
+    if not as_json:
+        click.echo("📦 Extracting AST with graphify...")
+    # graphify writes progress and warnings to stdout. Under --json that would
+    # sit in front of the payload and make it unparseable, so it goes to stderr,
+    # where a human still sees it and a parser does not.
+    with _stdout_to_stderr_if(as_json):
+        loader._run_graphify()
+    loader.file_hashes = loader._load_file_hashes()
+
+    # 2. Layers. No template, no fallback: either they exist, or we ask.
+    applied_cfg = None
+    if relayer or not config_path(root):
+        applied_cfg = _apply_pending_layer_response(path)
+        if applied_cfg and not as_json:
+            click.echo(f"🏗️  Applied the agent's layer design → {applied_cfg}")
+
+    notes: List[str] = []
+    registry, cfg_path, source = auto_configure_layers(
+        path, force=relayer and not applied_cfg, use_agent=agent_cli,
+        agent_model=agent_model, notes=notes,
+    )
+    for note in notes:
+        if not as_json:
+            click.echo(f"   ℹ️  {note}")
+
+    if registry is None:
+        request_path = generate_propose_request(path)
+        _emit_status(STATUS_NEEDS_LAYERS, "layers", [
+            "This repository has no architectural layer set, and TLDRGraph will",
+            "not invent one from a template. Design it from the code:",
+            "",
+            f"  1. Read {os.path.relpath(request_path, root)}",
+            "  2. OPEN real source files -- entry points first, then one file from",
+            "     each cluster in the evidence. Do not skip this step.",
+            f"  3. Write {os.path.join(STATE_DIR, PROPOSE_RESPONSE_FILENAME)} with",
+            '     {"utility_id": "...", "layers": [{id, name, order, description, rules}]}',
+            "     3-6 layers plus one catch-all whose id equals utility_id and whose",
+            "     rules are []. Name them after THIS repository's concepts.",
+            "  4. Run: tldrgraph init",
+        ], as_json=as_json)
+        return STATUS_NEEDS_LAYERS
+
+    if not as_json:
+        if applied_cfg:
+            label = "designed by your agent"
+        elif source == "existing_config":
+            label = "already configured"
+        else:
+            label = source
+        click.echo(f"🏛️  {len(registry)} architectural layers ({label})")
+
+    # 3. Full build: classify, index, persist.
     graph = loader.load_or_extract(rebuild=rebuild)
     _stamp_degrees(loader)
     snapshot_path = loader.save_graph()
-    yaml_path = loader.export_yaml()
+    loader.export_yaml()
 
-    click.echo(f"✅ Ingested {graph.number_of_nodes()} nodes and {graph.number_of_edges()} relationships.")
-    diag = loader.vector_store.diagnostics()
-    click.echo(f"🔎 Retrieval backend: {diag['backend']} "
-               f"(bridge score floor {diag['score_floor']}) — `tldrgraph doctor` for detail")
-    click.echo(f"💾 Graph snapshot persisted at: {snapshot_path}")
-    click.echo(f"📊 Layer breakdown exported to YAML at: {yaml_path}")
-    html_path = generate_visualizer_html(path)
-    click.echo(f"🌐 Interactive Visualizer generated at: {html_path}\n")
+    if not as_json:
+        click.echo(f"✅ {graph.number_of_nodes()} nodes, {graph.number_of_edges()} relationships")
+        diag = loader.vector_store.diagnostics()
+        click.echo(f"🔎 Retrieval: {diag['backend']} (floor {diag['score_floor']})")
+        click.echo(f"💾 {snapshot_path}")
 
-    for layer, nodes in loader.nodes_by_layer.items():
-        click.echo(f"  • {layer.ljust(35)} : {len(nodes)} nodes")
-    click.echo("\n✨ Scan complete! Open .tldrgraph/TLDRGRAPH_VISUALIZER.html to explore the architectural layers visually.")
+    # 4. Enrichment. Apply anything the agent already answered, then either
+    #    finish, ask permission, or hand out the next batch.
+    applied = _apply_pending_enrichment_response(path, loader)
+    if applied and not as_json:
+        click.echo(f"🧠 Applied {len(applied['applied_ids'])} enrichment(s), "
+                   f"{applied['bridges']} bridge edge(s)")
+        # An id that is not in the graph is silently worthless, and an agent
+        # that invented one will keep inventing it. Say so, with examples.
+        if applied["unknown_ids"]:
+            preview = ", ".join(applied["unknown_ids"][:4])
+            click.echo(f"   ⚠️  {len(applied['unknown_ids'])} id(s) are not in the graph "
+                       f"and were dropped: {preview}")
+            click.echo("      Copy ids verbatim from the request; do not construct them.")
+        if applied["unresolved"]:
+            preview = ", ".join(sorted(set(applied["unresolved"]))[:4])
+            click.echo(f"   ⚠️  {len(applied['unresolved'])} call target(s) matched nothing "
+                       f"above the score floor: {preview}")
+
+    generate_visualizer_html(path)
+
+    candidates = _enrichment_candidates(loader, compute_degrees(loader.graph))
+    total = loader.graph.number_of_nodes()
+    # Counting `total - candidates` as "enriched" would fold in every node that
+    # was never eligible -- the utility bucket and graphify's prose nodes -- and
+    # report a large number before a single intent had been written.
+    enriched = sum(
+        1 for _, d in loader.graph.nodes(data=True)
+        if (d.get("enrichment_source") or "") == AGENT_ENRICHMENT_SOURCE
+    )
+    excluded = total - enriched - len(candidates)
+
+    if not candidates:
+        _emit_status(STATUS_DONE, "enrichment", [
+            f"{total} nodes across {len(registry)} layers. {enriched} enriched from "
+            f"source; {excluded} not eligible (utility bucket and prose nodes).",
+            "",
+            '  tldrgraph query "<feature in plain English>"',
+            '  tldrgraph trace "<Source>" "<Target>"',
+            "  tldrgraph layers",
+            "  tldrgraph ui --serve",
+        ], progress={"total_nodes": total, "enriched": enriched, "remaining": 0},
+            as_json=as_json)
+        return STATUS_DONE
+
+    planned = min(len(candidates), max_nodes) if max_nodes else len(candidates)
+    rounds = (planned + batch_size - 1) // batch_size
+    progress = {
+        "total_nodes": total,
+        "enriched": enriched,
+        "excluded": excluded,
+        "remaining": len(candidates),
+        "planned_this_run": planned,
+        "batch_size": batch_size,
+        "agent_rounds": rounds,
+    }
+
+    if not assume_yes:
+        if _stdin_is_interactive():
+            click.echo(f"\n🧠 {len(candidates)} node(s) need an intent read from the source "
+                       f"({rounds} batch(es) of {batch_size}).")
+            if click.confirm("   Enrich now?", default=True):
+                assume_yes = True
+            else:
+                click.echo("   Skipped. Run `tldrgraph init` again when ready.")
+                return STATUS_NEEDS_CONFIRMATION
+        else:
+            _emit_status(STATUS_NEEDS_CONFIRMATION, "enrichment", [
+                f"The graph is built and queryable: {total} nodes, {enriched} enriched "
+                f"from source, {excluded} not eligible (utility bucket, prose nodes).",
+                "",
+                f"{len(candidates)} node(s) still carry generated summaries rather than",
+                "an intent read from the source. Enriching them means roughly",
+                f"{rounds} round(s) of {batch_size} nodes, and each round costs tokens.",
+                "",
+                "ASK THE USER whether to proceed, showing them that estimate. Then:",
+                "",
+                "  they agree          → tldrgraph init --yes",
+                "  smaller first pass  → tldrgraph init --yes --limit 100",
+                "  they decline        → stop here; the graph is already usable",
+            ], progress=progress, as_json=as_json)
+            return STATUS_NEEDS_CONFIRMATION
+
+    # 5. Enrich: drive an agent CLI if one was opted into, else hand off.
+    if agent_cli:
+        agent = agent_runner.find_agent_cli()
+        if agent is not None:
+            if not as_json:
+                click.echo(f"\n🤖 Enriching via {agent.display}...")
+            totals = run_agent_enrichment(path, loader, agent, batch_size=batch_size,
+                                          max_nodes=max_nodes, model=agent_model)
+            remaining = len(_enrichment_candidates(loader, compute_degrees(loader.graph)))
+            status = STATUS_DONE if not remaining else STATUS_NEEDS_ENRICHMENT
+            _emit_status(status, "enrichment", [
+                f"Enriched {totals['applied']} node(s) in {totals['batches']} batch(es); "
+                f"{totals['bridges']} bridge edge(s).",
+                f"{remaining} still un-enriched."
+                if remaining else "Nothing left to enrich.",
+            ] + (["Run `tldrgraph init --yes` to continue."] if remaining else []),
+                progress={**progress, "remaining": remaining}, as_json=as_json)
+            return status
+        if not as_json:
+            click.echo(f"   ℹ️  No agent CLI available "
+                       f"({agent_runner.agent_status()['detail']}); handing off instead.")
+
+    request = build_enrichment_batch(
+        path, loader, compute_degrees(loader.graph),
+        limit=batch_size if not max_nodes else min(batch_size, max_nodes),
+        skip_cursor=True,
+    )
+    request_path = _write_payload(_state_path(path, REQUEST_FILENAME), request["payload"])
+
+    _emit_status(STATUS_NEEDS_ENRICHMENT, "enrichment", [
+        f"{len(request['batch'])} node(s) queued, {len(candidates)} remaining overall.",
+        "",
+        f"  1. Read {os.path.relpath(request_path, root)}",
+        "  2. OPEN the source file of every node in it. An intent guessed from a",
+        "     symbol name is worse than none -- it poisons semantic search.",
+        f"  3. Write {os.path.join(STATE_DIR, RESPONSE_FILENAME)} as a YAML list of",
+        "     {id, intent, input_fields, output_fields, calls}. Never invent",
+        "     fields or calls; omit what you cannot verify.",
+        "  4. Run: tldrgraph init --yes",
+        "",
+        "Repeat until this says status: done.",
+    ], progress=progress, as_json=as_json)
+    return STATUS_NEEDS_ENRICHMENT
+
+
+_init_options = [
+    click.argument("path", default=".", type=click.Path(exists=True)),
+    click.option("--yes", "-y", "assume_yes", is_flag=True,
+                 help="Proceed with enrichment without asking (agents: only after the user agrees)"),
+    click.option("--batch", "batch_size", default=25, show_default=True,
+                 help="Nodes handed to the agent per round"),
+    click.option("--limit", "max_nodes", default=0, show_default=True,
+                 help="Cap on nodes to enrich this run. 0 enriches every candidate."),
+    click.option("--rebuild", is_flag=True, help="Re-extract and rebuild enrichment from scratch"),
+    click.option("--relayer", is_flag=True, help="Discard the layer set and design it again"),
+    click.option("--agent-cli", is_flag=True,
+                 help="Shell out to an agent CLI (claude/cursor-agent/gemini) instead of "
+                      "handing off. Off by default: agent CLIs differ per tool and can hang."),
+    click.option("--agent-model", default=None,
+                 help="Model for --agent-cli (e.g. opus, sonnet, gemini-2.5-pro). Defaults "
+                      "to $TLDRGRAPH_AGENT_MODEL. Ignored on the handshake path, where your "
+                      "own agent session picks the model."),
+    click.option("--json", "as_json", is_flag=True, help="Emit machine-readable status"),
+    embeddings_option,
+]
+
+
+def _with_init_options(fn):
+    for option in reversed(_init_options):
+        fn = option(fn)
+    return fn
+
+
+@cli.command()
+@_with_init_options
+def init(path, assume_yes, batch_size, max_nodes, rebuild, relayer, agent_cli, agent_model, as_json, embeddings):
+    """
+    Build this repository's graph: layers, extraction, and enrichment, in one command.
+
+    Resumable. Run it, do whatever the NEXT ACTION block says, run it again.
+    Layers are always designed from your code -- there is no template fallback.
+    """
+    _init_pipeline(path, assume_yes, batch_size, max_nodes, rebuild, relayer,
+                   agent_cli, agent_model, embeddings, as_json)
+
+
+@cli.command()
+@_with_init_options
+def scan(path, assume_yes, batch_size, max_nodes, rebuild, relayer, agent_cli, agent_model, as_json, embeddings):
+    """Alias for `init`, kept for existing scripts and agent rules."""
+    _init_pipeline(path, assume_yes, batch_size, max_nodes, rebuild, relayer,
+                   agent_cli, agent_model, embeddings, as_json)
+
+
+@cli.command()
+@_with_init_options
+def enrich(path, assume_yes, batch_size, max_nodes, rebuild, relayer, agent_cli, agent_model, as_json, embeddings):
+    """Alias for `init`, which already resumes enrichment where it left off."""
+    _init_pipeline(path, assume_yes, batch_size, max_nodes, rebuild, relayer,
+                   agent_cli, agent_model, embeddings, as_json)
 
 
 @cli.command(name="ui")
@@ -434,63 +1172,18 @@ def queue_enrichment(path, limit, requeue, reset):
     degrees = _stamp_degrees(loader)
     loader.save_graph()
 
-    cursor = _read_cursor(path)
-    if reset:
-        cursor = {"queued": [], "applied": []}
-
-    # Anything already answered in a response file counts as done, even if
-    # apply-enrichment has not run yet.
-    answered = set(cursor["applied"])
-    for filename in (RESPONSE_FILENAME, LEGACY_RESPONSE_FILENAME, "pending_enrichment.yaml", LEGACY_FILENAME):
-        for item in coerce_enrichment_items(_read_payload(_state_path(path, filename))):
-            if item.get("id"):
-                answered.add(str(item["id"]))
-
-    skip = set(answered)
-    if not requeue:
-        skip |= set(cursor["queued"])
-
-    candidates = _enrichment_candidates(loader, degrees)
-    total_candidates = len(candidates)
-    pending = [c for c in candidates if c["id"] not in skip]
-
-    batch = pending if limit <= 0 else pending[:limit]
-    for rank, node in enumerate(batch, 1):
-        node["rank"] = rank
-
-    already_enriched = sum(
-        1 for _, d in loader.graph.nodes(data=True)
-        if layer_id_of(d) != get_registry().utility_id and not needs_agent_enrichment(d)
+    request = build_enrichment_batch(
+        path, loader, degrees, limit=limit, requeue=requeue, reset=reset
     )
-    remaining_after = max(len(pending) - len(batch), 0)
+    batch = request["batch"]
+    cursor = request["cursor"]
+    total_candidates = request["total_candidates"]
+    already_enriched = request["already_enriched"]
+    remaining_after = request["remaining_after"]
 
     request_path = _state_path(path, REQUEST_FILENAME)
     response_path = _state_path(path, RESPONSE_FILENAME)
-    _write_payload(request_path, {
-        "schema": "codechakra/enrichment-request@1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "response_file": os.path.join(STATE_DIR, RESPONSE_FILENAME),
-        "contract": os.path.join(STATE_DIR, "AGENT_CONTRACT.md"),
-        "instructions": [
-            "Open and READ each node's source file before writing its intent - you have the repo.",
-            "Write 'intent' in Markdown (single-line summary or rich multiline markdown). Add as much context as needed.",
-            "In 'input_fields', list input arguments, parameters, payload attributes, or request body fields.",
-            "In 'output_fields', list return values, response schemas, emitted event names, or mutated state fields.",
-            "In 'calls', specify exact downstream targets: node ID, file:symbol (e.g. 'src/services/calc.ts:calculate'), file path, or symbol name.",
-            "When multiple methods share the same name across files, use 'file_path:method' or exact node 'id' to ensure precise linking.",
-            "Copy each 'id' verbatim.",
-            f"Write a YAML list of {{id, intent, input_fields, output_fields, calls}} to {os.path.join(STATE_DIR, RESPONSE_FILENAME)} (NOT back into this request file).",
-            "Then run: tldrgraph apply-enrichment",
-        ],
-        "ordering": "cross_layer_degree desc, then degree (in+out) desc, then id asc",
-        "progress": {
-            "total_candidates": total_candidates,
-            "already_enriched": already_enriched,
-            "queued_now": len(batch),
-            "remaining_after": remaining_after,
-        },
-        "nodes": batch,
-    })
+    _write_payload(request_path, request["payload"])
 
     cursor_path = _write_cursor(path, cursor["queued"] + [n["id"] for n in batch], cursor["applied"])
 
@@ -557,130 +1250,23 @@ def apply_enrichment(enrichment_file, path):
     loader = GraphLoader(path)
     loader.load_or_extract(enrich_llm=False)
 
-    floor = bridge_score_floor(loader.vector_store)
-
-    applied_ids: List[str] = []
-    unknown_ids: List[str] = []
-    bridges = 0
-    unresolved: List[str] = []
-
-    for item in items:
-        nid = item.get("id")
-        if not nid:
-            continue
-        nid = str(nid)
-        if not loader.graph.has_node(nid):
-            unknown_ids.append(nid)
-            continue
-
-        node_data = loader.graph.nodes[nid]
-        intent = item.get("intent", "")
-        input_fields = item.get("input_fields", []) or []
-        output_fields = item.get("output_fields", []) or []
-        legacy_fields = item.get("fields", []) or []
-        calls = item.get("calls", []) or []
-
-        # Optional layer_id override from agent
-        override_lid = item.get("layer_id")
-        if override_lid and override_lid in get_registry():
-            node_data["layer_id"] = override_lid
-            node_data["layer"] = get_registry().name(override_lid)
-            node_data["layer_source"] = AGENT_ENRICHMENT_SOURCE
-
-        if intent:
-            node_data["intent"] = intent
-            first_line = intent.strip().split("\n")[0].lstrip("#- *").strip()
-            node_data["summary"] = f"{node_data['layer']}: {node_data['label']} - {first_line or intent}"
-            node_data["enrichment_source"] = AGENT_ENRICHMENT_SOURCE
-
-        if input_fields or output_fields:
-            node_data["input_fields"] = input_fields
-            node_data["output_fields"] = output_fields
-            node_data["fields"] = list(input_fields) + list(output_fields)
-        elif legacy_fields:
-            node_data["input_fields"] = legacy_fields
-            node_data["output_fields"] = []
-            node_data["fields"] = legacy_fields
-
-        fields_dict = {
-            "input_fields": node_data.get("input_fields", []),
-            "output_fields": node_data.get("output_fields", []),
-            "fields": node_data.get("fields", [])
-        }
-        loader.hash_gate.update_node(
-            node_id=nid,
-            file_path=node_data.get("file", ""),
-            content=loader.node_signature(node_data),
-            layer=node_data.get("layer", ""),
-            summary=node_data.get("summary", ""),
-            fields_json=json.dumps(fields_dict),
-            intent=node_data.get("intent", "")
-        )
-
-        for call_target in calls:
-            tgt_id, score = resolve_call_target(
-                loader.graph, loader.vector_store, call_target, nid, floor
-            )
-            if tgt_id:
-                loader.graph.add_edge(
-                    nid, tgt_id,
-                    relation="cross_layer_link",
-                    confidence=float(score)
-                )
-                bridges += 1
-            else:
-                unresolved.append(str(call_target))
-
-        applied_ids.append(nid)
-
-    # Re-index so the applied intents/fields are actually searchable, then persist.
-    loader.vector_store.add_documents(loader.docs_to_index)
-    _stamp_degrees(loader)
-    snapshot_path = loader.save_graph()
-    loader.export_yaml()
-
-    cursor = _read_cursor(path)
-    remaining_queued = [i for i in cursor["queued"] if i not in set(applied_ids)]
-    _write_cursor(path, remaining_queued, cursor["applied"] + applied_ids)
+    stats = apply_enrichment_items(loader, path, items, enrichment_file)
+    applied_ids = stats["applied_ids"]
+    unknown_ids = stats["unknown_ids"]
+    unresolved = stats["unresolved"]
 
     still_pending = sum(1 for _, d in loader.graph.nodes(data=True) if needs_agent_enrichment(d))
 
-    # Append to audit log
-    audit_path = _state_path(path, AUDIT_LOG_FILENAME)
-    timestamp = datetime.now(timezone.utc).isoformat()
-    try:
-        with open(audit_path, "a", encoding="utf-8") as f:
-            f.write(f"\n--- Enrichment Batch Applied: {timestamp} ---\n")
-            f.write(f"Source file: {enrichment_file}\n")
-            f.write(f"Applied nodes ({len(applied_ids)}): {', '.join(applied_ids)}\n")
-            f.write(f"Bridge edges created: {bridges}\n")
-            for item in items:
-                nid = str(item.get("id") or "")
-                if nid in applied_ids:
-                    f.write(f"  • [{nid}] intent:\n    {item.get('intent', '')}\n")
-                    if item.get("input_fields"):
-                        f.write(f"    input_fields: {item.get('input_fields')}\n")
-                    if item.get("output_fields"):
-                        f.write(f"    output_fields: {item.get('output_fields')}\n")
-                    elif item.get("fields"):
-                        f.write(f"    fields: {item.get('fields')}\n")
-                    if item.get("calls"):
-                        f.write(f"    calls: {item.get('calls')}\n")
-            if unresolved:
-                f.write(f"Unresolved call targets: {', '.join(unresolved)}\n")
-    except Exception:
-        pass
-
     click.echo(f"✅ Applied {len(applied_ids)} enrichment(s) from {enrichment_file}")
-    click.echo(f"🔗 Created {bridges} cross-layer bridge edge(s) "
-               f"(score floor {floor}, backend {loader.vector_store.backend})")
+    click.echo(f"🔗 Created {stats['bridges']} cross-layer bridge edge(s) "
+               f"(score floor {stats['floor']}, backend {loader.vector_store.backend})")
     if unresolved:
         preview = ", ".join(sorted(set(unresolved))[:6])
         click.echo(f"⚠️  {len(unresolved)} call target(s) below the score floor / unmatched: {preview}")
     if unknown_ids:
         preview = ", ".join(unknown_ids[:3])
         click.echo(f"⚠️  {len(unknown_ids)} id(s) not in the graph, skipped: {preview}")
-    click.echo(f"💾 Graph snapshot updated at: {snapshot_path}")
+    click.echo(f"💾 Graph snapshot updated at: {stats['snapshot_path']}")
     click.echo(f"📊 {still_pending} candidate(s) still un-enriched. Run `tldrgraph queue-enrichment` for the next batch.")
 
 
@@ -880,12 +1466,28 @@ def doctor(path, embeddings, as_json):
 
 @cli.command()
 @click.option("--path", default=".", help="Repository root path")
-def install(path):
-    """Install TLDRGraph agent rules for Claude Code, Cursor and Antigravity."""
-    res = install_agent_rules(path)
+@click.option("--all-agents", is_flag=True,
+              help="Write the /tldrgraph-init command for every agent tool TLDRGraph "
+                   "knows, not just the ones this repo shows signs of using.")
+def install(path, all_agents):
+    """
+    Install TLDRGraph agent rules for Claude Code, Cursor and Antigravity.
+
+    Also adds a managed .gitignore block: generated state under .tldrgraph/ is
+    ignored, while AGENT_CONTRACT.md and layers.config.yaml stay committable so
+    the whole team shares one architecture map.
+    """
+    gitignore = ensure_gitignore(path)
+    res = install_agent_rules(path, all_agents=all_agents)
     click.echo("✅ TLDRGraph agent skills & rules installed successfully:")
     for k, v in res.items():
+        # Reported separately below, with its status.
+        if k == "gitignore":
+            continue
         click.echo(f"  • {k}: {v}")
+    click.echo(f"  • gitignore: {gitignore['path']} ({gitignore['status']})")
+    click.echo("\n💡 Your agent can now run /tldrgraph-init (or just `tldrgraph init`) "
+               "to build the whole graph.")
 
     for warning in gitignore_warnings(path):
         click.echo(f"⚠️  {warning}")
@@ -893,20 +1495,29 @@ def install(path):
 
 @cli.command("propose-layers")
 @click.option("--path", default=".", help="Repository root path")
-@click.option("--auto", is_flag=True, help="Automatically synthesize and apply dynamic layer config via LLM or archetype")
-@click.option("--force", is_flag=True, help="Force overwrite existing layers.config.yaml when using --auto")
+@click.option("--auto", is_flag=True,
+              help="Try to synthesize the layer set now via an agent CLI or a configured LLM")
+@click.option("--force", is_flag=True, help="Force overwrite an existing layers.config.yaml")
 def propose_layers_cmd(path, auto, force):
-    """Sample repository architecture evidence and synthesize/queue dynamic layer proposal."""
+    """
+    Write the layer-proposal request for the agent, or try to synthesize it now.
+
+    `tldrgraph init` calls this for you. Reach for it directly only to re-open the
+    architecture question without rebuilding anything else.
+    """
     if auto:
-        reg, out_path, source = auto_configure_layers(path, force=force)
-        click.echo(f"✅ Automatically configured {len(reg)} architectural layers ({source}) in {out_path}")
-        click.echo("🔄 Run `tldrgraph scan .` to reclassify nodes with the new layer set.")
-        return
+        reg, out_path, source = auto_configure_layers(path, force=force, use_agent=True)
+        if reg is not None:
+            click.echo(f"✅ Configured {len(reg)} architectural layers ({source}) in {out_path}")
+            click.echo("🔄 Run `tldrgraph init` to reclassify nodes with the new layer set.")
+            return
+        click.echo("ℹ️  Nothing could design the layers automatically, and TLDRGraph "
+                   "has no template to fall back on.")
 
     req_path = generate_propose_request(path)
     click.echo(f"📋 Queued layer proposal request in {req_path}")
-    resp_rel = os.path.join(STATE_DIR, "propose_layers_response.json")
-    click.echo(f"👉 Write the response to {resp_rel}, then run `tldrgraph apply-layers`.")
+    resp_rel = os.path.join(STATE_DIR, PROPOSE_RESPONSE_FILENAME)
+    click.echo(f"👉 Read it, READ THE SOURCE, write {resp_rel}, then run `tldrgraph init`.")
 
 
 @cli.command("apply-layers")
