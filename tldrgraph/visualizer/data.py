@@ -41,37 +41,35 @@ def _extract_snapshot(root_dir: str) -> Dict[str, Any]:
 
     loader = GraphLoader(root_dir)
     loader.load_or_extract(enrich_llm=False)
-    return {
-        "nodes": [
-            {
-                "id": str(nid),
-                "label": data.get("label", str(nid)),
-                "display_label": data.get("display_label") or data.get("label", str(nid)),
-                "file": data.get("file", ""),
-                "layer": data.get("layer", "General / Utility"),
-                "layer_id": data.get("layer_id", "utility"),
-                "type": data.get("type", "code"),
-                "summary": data.get("summary", ""),
-                "intent": data.get("intent", ""),
-                "input_fields": data.get("input_fields", []),
-                "output_fields": data.get("output_fields", []),
-                "fields": data.get("fields", []),
-                "is_test": data.get("is_test", is_test_node(data.get("file", ""), data.get("label", ""))),
-                "source_location": data.get("source_location"),
-                "dead_code_status": data.get("dead_code_status", "live"),
-            }
-            for nid, data in loader.graph.nodes(data=True)
-        ],
-        "edges": [
-            {
-                "source": str(u),
-                "target": str(v),
-                "relation": d.get("relation", "calls"),
-                "confidence": float(d.get("confidence", 1.0)),
-            }
-            for u, v, d in loader.graph.edges(data=True)
-        ],
-    }
+    nodes = []
+    for nid, data in loader.graph.nodes(data=True):
+        f = data.get("file", "")
+        lbl = data.get("label", str(nid))
+        nodes.append({
+            "id": str(nid), "label": lbl, "display_label": data.get("display_label") or lbl,
+            "file": f, "layer": data.get("layer", "General / Utility"),
+            "layer_id": data.get("layer_id", "utility"), "type": data.get("type", "code"),
+            "summary": data.get("summary", ""), "intent": data.get("intent", ""),
+            "input_fields": data.get("input_fields", []), "output_fields": data.get("output_fields", []),
+            "fields": data.get("fields", []), "is_test": data.get("is_test", is_test_node(f, lbl)),
+            "source_location": data.get("source_location"), "dead_code_status": data.get("dead_code_status", "live"),
+            "dead_code_reason": data.get("dead_code_reason", ""),
+        })
+    edges = [
+        {"source": str(u), "target": str(v), "relation": d.get("relation", "calls"), "confidence": float(d.get("confidence", 1.0))}
+        for u, v, d in loader.graph.edges(data=True)
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _is_private_or_file_label(lbl: str, dl: str, fpath: str) -> bool:
+    if lbl.startswith("_") or lbl.startswith("._") or lbl.startswith(".__"):
+        return True
+    if dl.startswith("_") or "._" in dl or ".__" in dl:
+        return True
+    if fpath and (lbl == os.path.basename(fpath) or dl == os.path.basename(fpath)):
+        return True
+    return False
 
 
 def _is_renderable_node(n: Dict[str, Any]) -> bool:
@@ -83,26 +81,15 @@ def _is_renderable_node(n: Dict[str, Any]) -> bool:
         return False
 
     lbl = n.get("label", "")
-    # Prose-like pseudo labels ("something: else", "a.b c") are not real symbols.
     if " " in lbl and not lbl.endswith(")") and not lbl.startswith("class ") and any(c in lbl for c in ":{}."):
         return False
 
-    dl = n.get("display_label", lbl)
     fpath = n.get("file", "")
-
-    if lbl.startswith("_") or lbl.startswith("._") or lbl.startswith(".__") or dl.startswith("_") or "._" in dl or ".__" in dl:
-        return False
-
-    if fpath and (lbl == os.path.basename(fpath) or dl == os.path.basename(fpath)):
-        return False
-
-    # No owning file means an imported name or a bare decorator reference, not a
-    # symbol anyone can navigate to. These used to pile up in a "root_fixtures"
-    # bucket that carried no information.
     if not fpath.strip():
         return False
 
-    return True
+    dl = n.get("display_label", lbl)
+    return not _is_private_or_file_label(lbl, dl, fpath)
 
 
 def _build_layer_map(nodes: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -154,6 +141,80 @@ def _module_id_for(fpath: str) -> str:
     return f"mod_{re.sub(r'[^a-zA-Z0-9_]', '_', fpath)}"
 
 
+def _build_single_node_record(
+    n: Dict[str, Any],
+    layer_map: Dict[str, Dict[str, Any]],
+    sources: SourceIndex,
+) -> Tuple[Dict[str, Any], str, str, bool, Dict[str, Any]]:
+    nid = str(n["id"])
+    fpath = (n.get("file") or "").strip()
+    lid = n.get("layer_id") or "utility"
+    layer_info = layer_map.get(lid, FALLBACK_COLOR)
+    label = n.get("label") or nid
+    display_label = n.get("display_label") or label
+    test_flag = bool(n.get("is_test", is_test_node(fpath, label)))
+    mod_id = _module_id_for(fpath)
+    located = sources.locate_symbol(
+        fpath, n.get("source_location"), symbol_name(label, display_label)
+    ) or {}
+
+    node_rec = {
+        "id": nid,
+        "label": label,
+        "display_label": display_label,
+        "file": fpath,
+        "layer_id": lid,
+        "layer": layer_info["name"],
+        "type": n.get("type", "function"),
+        "tier": 2,
+        "is_test": test_flag,
+        "intent": n.get("intent") or n.get("summary") or f"`{label}` in `{fpath}`.",
+        "summary": n.get("summary") or "",
+        "input_fields": n.get("input_fields") or [],
+        "output_fields": n.get("output_fields") or [],
+        "fields": n.get("fields") or [],
+        "source_location": n.get("source_location") or "",
+        "dead_code_status": n.get("dead_code_status") or "live",
+        "path": fpath,
+        "name": symbol_name(label, display_label),
+        "language": language_for(fpath),
+        "code_start": located.get("start", 0),
+        "code_end": located.get("end", 0),
+        "code_relocated": bool(located.get("relocated", False)),
+        "module_id": mod_id,
+        "inbound": [],
+        "outbound": [],
+    }
+    return node_rec, mod_id, lid, test_flag, layer_info
+
+
+def _ensure_module_record(
+    modules_by_id: Dict[str, Dict[str, Any]],
+    mod_id: str,
+    fpath: str,
+    lid: str,
+    layer_info: Dict[str, Any],
+    test_flag: bool,
+) -> None:
+    if mod_id not in modules_by_id:
+        mod_label = os.path.basename(fpath)
+        modules_by_id[mod_id] = {
+            "id": mod_id,
+            "label": mod_label,
+            "file": fpath,
+            "layer_id": lid,
+            "layer": layer_info["name"],
+            "tier": 1,
+            "is_test": test_flag,
+            "intent": f"Module `{mod_label}` in {layer_info['name']}.",
+            "path": fpath,
+            "language": language_for(fpath),
+            "subnodes": [],
+            "inbound_modules": set(),
+            "outbound_modules": set(),
+        }
+
+
 def _build_nodes_and_modules(
     raw_nodes: List[Dict[str, Any]],
     layer_map: Dict[str, Dict[str, Any]],
@@ -164,67 +225,70 @@ def _build_nodes_and_modules(
     nodes_by_id: Dict[str, Dict[str, Any]] = {}
 
     for n in raw_nodes:
-        nid = str(n["id"])
-        fpath = (n.get("file") or "").strip()
-        lid = n.get("layer_id") or "utility"
-        layer_info = layer_map.get(lid, FALLBACK_COLOR)
-        label = n.get("label") or nid
-        display_label = n.get("display_label") or label
-        test_flag = bool(n.get("is_test", is_test_node(fpath, label)))
-        mod_id = _module_id_for(fpath)
-        pretty_file = fpath
-        located = sources.locate_symbol(
-            fpath, n.get("source_location"), symbol_name(label, display_label)
-        ) or {}
-
-        nodes_by_id[nid] = {
-            "id": nid,
-            "label": label,
-            "display_label": display_label,
-            "file": pretty_file,
-            "layer_id": lid,
-            "layer": layer_info["name"],
-            "type": n.get("type", "function"),
-            "tier": 2,
-            "is_test": test_flag,
-            "intent": n.get("intent") or n.get("summary") or f"`{label}` in `{fpath}`.",
-            "summary": n.get("summary") or "",
-            "input_fields": n.get("input_fields") or [],
-            "output_fields": n.get("output_fields") or [],
-            "fields": n.get("fields") or [],
-            "source_location": n.get("source_location") or "",
-            "dead_code_status": n.get("dead_code_status") or "live",
-            "path": fpath,
-            "name": symbol_name(label, display_label),
-            "language": language_for(fpath),
-            "code_start": located.get("start", 0),
-            "code_end": located.get("end", 0),
-            "code_relocated": bool(located.get("relocated", False)),
-            "module_id": mod_id,
-            "inbound": [],
-            "outbound": [],
-        }
-
-        if mod_id not in modules_by_id:
-            mod_label = os.path.basename(fpath)
-            modules_by_id[mod_id] = {
-                "id": mod_id,
-                "label": mod_label,
-                "file": pretty_file,
-                "layer_id": lid,
-                "layer": layer_info["name"],
-                "tier": 1,
-                "is_test": test_flag,
-                "intent": f"Module `{mod_label}` in {layer_info['name']}.",
-                "path": fpath,
-                "language": language_for(fpath),
-                "subnodes": [],
-                "inbound_modules": set(),
-                "outbound_modules": set(),
-            }
-        modules_by_id[mod_id]["subnodes"].append(nodes_by_id[nid])
+        node_rec, mod_id, lid, test_flag, layer_info = _build_single_node_record(n, layer_map, sources)
+        nodes_by_id[node_rec["id"]] = node_rec
+        _ensure_module_record(modules_by_id, mod_id, node_rec["file"], lid, layer_info, test_flag)
+        modules_by_id[mod_id]["subnodes"].append(node_rec)
 
     return nodes_by_id, modules_by_id
+
+
+def _record_node_edges(
+    src_node: Dict[str, Any],
+    tgt_node: Dict[str, Any],
+    relation: str,
+    confidence: float,
+) -> Dict[str, Any]:
+    src_node["outbound"].append({
+        "target_id": tgt_node["id"],
+        "target_label": tgt_node["display_label"],
+        "target_file": tgt_node["file"],
+        "target_layer": tgt_node["layer"],
+        "relation": relation,
+        "confidence": confidence,
+    })
+    tgt_node["inbound"].append({
+        "source_id": src_node["id"],
+        "source_label": src_node["display_label"],
+        "source_file": src_node["file"],
+        "source_layer": src_node["layer"],
+        "relation": relation,
+        "confidence": confidence,
+    })
+    return {
+        "source": src_node["id"],
+        "target": tgt_node["id"],
+        "source_mod": src_node["module_id"],
+        "target_mod": tgt_node["module_id"],
+        "relation": relation,
+        "confidence": confidence,
+    }
+
+
+def _record_module_edges(
+    modules_by_id: Dict[str, Dict[str, Any]],
+    module_edges_map: Dict[Tuple[str, str], Dict[str, Any]],
+    src_mod: str,
+    tgt_mod: str,
+    relation: str,
+    confidence: float,
+) -> None:
+    if src_mod == tgt_mod:
+        return
+    modules_by_id[src_mod]["outbound_modules"].add(tgt_mod)
+    modules_by_id[tgt_mod]["inbound_modules"].add(src_mod)
+
+    key = (src_mod, tgt_mod)
+    if key not in module_edges_map:
+        module_edges_map[key] = {
+            "source": src_mod,
+            "target": tgt_mod,
+            "count": 0,
+            "relations": set(),
+            "confidence": confidence,
+        }
+    module_edges_map[key]["count"] += 1
+    module_edges_map[key]["relations"].add(relation)
 
 
 def _build_edges(
@@ -240,61 +304,16 @@ def _build_edges(
     module_edges_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     for e in raw_edges:
-        src_id = str(e["source"])
-        tgt_id = str(e["target"])
+        src_id, tgt_id = str(e["source"]), str(e["target"])
         if src_id not in nodes_by_id or tgt_id not in nodes_by_id:
             continue
 
         relation = e.get("relation", "calls")
         confidence = float(e.get("confidence", 1.0))
-        src_node = nodes_by_id[src_id]
-        tgt_node = nodes_by_id[tgt_id]
+        src_node, tgt_node = nodes_by_id[src_id], nodes_by_id[tgt_id]
 
-        src_node["outbound"].append({
-            "target_id": tgt_id,
-            "target_label": tgt_node["display_label"],
-            "target_file": tgt_node["file"],
-            "target_layer": tgt_node["layer"],
-            "relation": relation,
-            "confidence": confidence,
-        })
-        tgt_node["inbound"].append({
-            "source_id": src_id,
-            "source_label": src_node["display_label"],
-            "source_file": src_node["file"],
-            "source_layer": src_node["layer"],
-            "relation": relation,
-            "confidence": confidence,
-        })
-
-        child_edges.append({
-            "source": src_id,
-            "target": tgt_id,
-            "source_mod": src_node["module_id"],
-            "target_mod": tgt_node["module_id"],
-            "relation": relation,
-            "confidence": confidence,
-        })
-
-        src_mod = src_node["module_id"]
-        tgt_mod = tgt_node["module_id"]
-        if src_mod == tgt_mod:
-            continue
-
-        modules_by_id[src_mod]["outbound_modules"].add(tgt_mod)
-        modules_by_id[tgt_mod]["inbound_modules"].add(src_mod)
-
-        key = (src_mod, tgt_mod)
-        if key not in module_edges_map:
-            module_edges_map[key] = {
-                "source": src_mod,
-                "target": tgt_mod,
-                "count": 0,
-                "relations": set(),
-                "confidence": confidence,
-            }
-        module_edges_map[key]["count"] += 1
-        module_edges_map[key]["relations"].add(relation)
+        child_edges.append(_record_node_edges(src_node, tgt_node, relation, confidence))
+        _record_module_edges(modules_by_id, module_edges_map, src_node["module_id"], tgt_node["module_id"], relation, confidence)
 
     module_edges = [
         {

@@ -120,9 +120,9 @@ and one `tldrgraph-init` command, byte-identical everywhere.
 
 | Artifact | Where |
 | --- | --- |
-| **Instructions** | `AGENTS.md` — the cross-tool standard, read by Claude Code, Cursor, opencode, Codex, Gemini CLI, Zed and Copilot |
-| | `.agents/rules/`, `.clinerules/`, `.windsurf/rules/` — only for tools not known to read AGENTS.md |
-| **Command** | `.claude/commands/`, `.cursor/commands/`, `.agents/workflows/`, `.clinerules/workflows/`, `.windsurf/workflows/`, `.opencode/command/`, `.roo/commands/`, `.kilocode/workflows/`, `.goosehints/` |
+| **Instructions** | `AGENTS.md` — the cross-tool standard, read by Claude Code, Cursor, Antigravity, opencode, Codex, Gemini CLI, Zed and Copilot |
+| | `.clinerules/`, `.windsurf/rules/` — only for tools not known to read AGENTS.md |
+| **Command** | `.claude/commands/`, `.cursor/commands/`, `.agents/skills/`, `.clinerules/workflows/`, `.windsurf/workflows/`, `.opencode/command/`, `.roo/commands/`, `.kilocode/workflows/`, `.goosehints/`, `.continue/prompts/` |
 
 Tools with a marker directory are installed only when the repo shows them in
 use; `tldrgraph install --all-agents` writes them all. Adding a tool is one row

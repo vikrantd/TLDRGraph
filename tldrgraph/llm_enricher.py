@@ -235,68 +235,60 @@ class LLMEnricher:
         except Exception:
             return None
 
-    def propose_layers(self, evidence: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Calls the configured LLM to synthesize a tailored multi-layer architectural definition.
-        Returns the parsed dictionary with 'utility_id' and 'layers' or None.
-        """
-        user_content = json.dumps(evidence, indent=2)
+    def _propose_layers_gemini(self, user_content: str) -> Optional[Dict[str, Any]]:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return None
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        payload = {
+            "system_instruction": {"parts": [{"text": PROPOSE_LAYERS_SYSTEM_PROMPT}]},
+            "contents": [{"parts": [{"text": user_content}]}],
+            "generationConfig": {"response_mime_type": "application/json"}
+        }
+        try:
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                parsed = json.loads(text)
+                if isinstance(parsed, dict) and "layers" in parsed:
+                    return parsed
+        except Exception:
+            pass
+        return None
 
-        # 1. Try Gemini
-        if os.getenv("GEMINI_API_KEY"):
-            api_key = os.getenv("GEMINI_API_KEY")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-            payload = {
-                "system_instruction": {"parts": [{"text": PROPOSE_LAYERS_SYSTEM_PROMPT}]},
-                "contents": [{"parts": [{"text": user_content}]}],
-                "generationConfig": {"response_mime_type": "application/json"}
-            }
-            try:
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={"Content-Type": "application/json"}
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    text = data["candidates"][0]["content"]["parts"][0]["text"]
-                    parsed = json.loads(text)
-                    if isinstance(parsed, dict) and "layers" in parsed:
-                        return parsed
-            except Exception:
-                pass
+    def _propose_layers_openai(self, user_content: str) -> Optional[Dict[str, Any]]:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return None
+        url = "https://api.openai.com/v1/chat/completions"
+        payload = {
+            "model": self.model or "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": PROPOSE_LAYERS_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content}
+            ],
+            "response_format": {"type": "json_object"}
+        }
+        try:
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                text = data["choices"][0]["message"]["content"]
+                parsed = json.loads(text)
+                if isinstance(parsed, dict) and "layers" in parsed:
+                    return parsed
+        except Exception:
+            pass
+        return None
 
-        # 2. Try OpenAI
-        if os.getenv("OPENAI_API_KEY"):
-            api_key = os.getenv("OPENAI_API_KEY")
-            url = "https://api.openai.com/v1/chat/completions"
-            payload = {
-                "model": self.model or "gpt-4o-mini",
-                "messages": [
-                    {"role": "system", "content": PROPOSE_LAYERS_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content}
-                ],
-                "response_format": {"type": "json_object"}
-            }
-            try:
-                req = urllib.request.Request(
-                    url,
-                    data=json.dumps(payload).encode("utf-8"),
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {api_key}"
-                    }
-                )
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    text = data["choices"][0]["message"]["content"]
-                    parsed = json.loads(text)
-                    if isinstance(parsed, dict) and "layers" in parsed:
-                        return parsed
-            except Exception:
-                pass
-
-        # 3. Try Local Ollama
+    def _propose_layers_ollama(self, user_content: str) -> Optional[Dict[str, Any]]:
         host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
         url = f"{host}/api/generate"
         payload = {
@@ -308,8 +300,7 @@ class LLMEnricher:
         }
         try:
             req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
+                url, data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"}
             )
             with urllib.request.urlopen(req, timeout=20) as resp:
@@ -320,8 +311,19 @@ class LLMEnricher:
                     return parsed
         except Exception:
             pass
-
         return None
+
+    def propose_layers(self, evidence: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Calls the configured LLM to synthesize a tailored multi-layer architectural definition.
+        Returns the parsed dictionary with 'utility_id' and 'layers' or None.
+        """
+        user_content = json.dumps(evidence, indent=2)
+        return (
+            self._propose_layers_gemini(user_content)
+            or self._propose_layers_openai(user_content)
+            or self._propose_layers_ollama(user_content)
+        )
 
     def _heuristic_enrichment(self, nodes_batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

@@ -25,4 +25,9 @@ other agent directory). Schema: `.tldrgraph/AGENT_CONTRACT.md`.
 
 `tldrgraph dead-code` lists **review candidates, not confirmed dead code**.
 `unreviewed` means "not enough evidence to conclude" and is never removable.
+
+## Code Quality & Architectural Standards
+- **File Length Limit**: Every source file in `tldrgraph/` must be strictly under 400 lines. Split large modules into cohesive sub-units.
+- **Function Complexity**: Functions and methods must be focused (<= 50 lines) with low cyclomatic complexity (<= 15).
+- **Modularity & Re-exports**: Keep modules decoupled; preserve backwards compatibility with top-level package re-exports.
 <!-- END TLDRGRAPH -->

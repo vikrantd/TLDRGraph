@@ -598,9 +598,7 @@ def test_install_writes_claude_cursor_and_antigravity(tmp_path):
         "AGENTS.md (instructions, all agents)": "AGENTS.md",
         "Claude Code (command)": ".claude/commands/tldrgraph-init.md",
         "Cursor (command)": ".cursor/commands/tldrgraph-init.md",
-        "Antigravity (command)": ".agents/workflows/tldrgraph-init.md",
-        # Antigravity is the one tool here not known to read AGENTS.md.
-        "Antigravity (instructions)": ".agents/rules/tldrgraph.md",
+        "Antigravity (command)": ".agents/skills/tldrgraph-init/SKILL.md",
     }
     assert set(written) == set(expected)
     for key, rel in expected.items():

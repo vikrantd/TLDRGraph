@@ -34,45 +34,29 @@ BLOCK_END = "<!-- END TLDRGRAPH -->"
 #: that would collide with the package's own CLI name in some shells.
 COMMAND_NAME = "tldrgraph-init"
 
-#: The cross-tool instructions standard. Read by Claude Code, Cursor, opencode,
-#: Codex, Gemini CLI, Zed and Copilot, so those tools need no file of their own.
+#: The cross-tool instructions standard. Read by Claude Code, Cursor, Antigravity,
+#: opencode, Codex, Gemini CLI, Zed and Copilot, so those tools need no file of their own.
 AGENTS_MD = "AGENTS.md"
 
 
 @dataclass(frozen=True)
 class AgentTarget:
     """One coding tool's file conventions. Paths only -- never behaviour."""
-
-    #: Display name used in installer output.
     name: str
-    #: Where this tool looks for a project command, relative to the repo root.
-    #: ``None`` for tools with no command concept.
     command_path: Optional[str] = None
-    #: Where this tool looks for always-loaded instructions, for tools that do
-    #: **not** read AGENTS.md. Leaving this ``None`` is the norm and is what
-    #: keeps a repo from accumulating five copies of the same paragraph.
     instructions_path: Optional[str] = None
-    #: Directory whose presence means this tool is actually used here. ``None``
-    #: installs unconditionally.
     marker: Optional[str] = None
-    #: True when the tool expects YAML frontmatter on these files.
     frontmatter: bool = True
 
 
-#: Every tool TLDRGraph knows, and nothing about how to run any of them.
-#:
-#: Tools listed without an ``instructions_path`` read AGENTS.md, which is always
-#: written. Confidence in the per-tool paths varies and that is fine: these are
-#: small markdown files a tool ignores if it does not know the path, and
-#: AGENTS.md carries the instructions regardless.
+#: Every tool TLDRGraph knows, with paths for commands and instructions.
 TARGETS: Tuple[AgentTarget, ...] = (
     AgentTarget("Claude Code", command_path=f".claude/commands/{COMMAND_NAME}.md"),
     AgentTarget("Cursor", command_path=f".cursor/commands/{COMMAND_NAME}.md"),
     AgentTarget("opencode", command_path=f".opencode/command/{COMMAND_NAME}.md",
                 marker=".opencode"),
     AgentTarget("Antigravity",
-                command_path=f".agents/workflows/{COMMAND_NAME}.md",
-                instructions_path=".agents/rules/tldrgraph.md"),
+                command_path=f".agents/skills/{COMMAND_NAME}/SKILL.md"),
     AgentTarget("Cline",
                 command_path=f".clinerules/workflows/{COMMAND_NAME}.md",
                 instructions_path=".clinerules/tldrgraph.md",
@@ -87,6 +71,8 @@ TARGETS: Tuple[AgentTarget, ...] = (
                 marker=".kilocode"),
     AgentTarget("Goose", command_path=f".goosehints/{COMMAND_NAME}.md",
                 marker=".goosehints", frontmatter=False),
+    AgentTarget("Continue", command_path=f".continue/prompts/{COMMAND_NAME}.prompt",
+                marker=".continue", frontmatter=False),
 )
 
 #: Files earlier versions installed. Removed on install so a repo does not carry
@@ -98,6 +84,9 @@ SUPERSEDED = (
     ".claude/commands/tldrgraph-enrich.md",
     ".cursor/rules/tldrgraph.mdc",
     ".agents/workflows/tldrgraph.md",
+    ".agents/workflows/tldrgraph-init.md",
+    ".agents/rules/tldrgraph.md",
+    ".agents/rules/tldrgraph-init.md",
 )
 
 
@@ -133,6 +122,11 @@ other agent directory). Schema: `.tldrgraph/AGENT_CONTRACT.md`.
 
 `tldrgraph dead-code` lists **review candidates, not confirmed dead code**.
 `unreviewed` means "not enough evidence to conclude" and is never removable.
+
+## Code Quality & Architectural Standards
+- **File Length Limit**: Every source file in `tldrgraph/` must be strictly under 400 lines. Split large modules into cohesive sub-units.
+- **Function Complexity**: Functions and methods must be focused (<= 50 lines) with low cyclomatic complexity (<= 15).
+- **Modularity & Re-exports**: Keep modules decoupled; preserve backwards compatibility with top-level package re-exports.
 """
 
 #: The full workflow. Every branch of the `init` state machine, spelled out.

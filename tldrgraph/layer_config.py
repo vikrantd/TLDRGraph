@@ -49,12 +49,51 @@ def compute_registry_hash(registry: LayerRegistry) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def validate_layer_config(data: Mapping[str, Any]) -> None:
-    """
-    Validates a raw layer configuration dictionary.
+def _validate_layer_rules(rules: Any, lid: str) -> None:
+    if not isinstance(rules, list):
+        raise ValueError(f"Layer {lid!r} 'rules' must be a list")
+    for r_idx, rule_dict in enumerate(rules):
+        if not isinstance(rule_dict, dict):
+            raise ValueError(f"Rule at index {r_idx} in layer {lid!r} must be an object")
+        try:
+            Rule.from_record(rule_dict)
+        except Exception as err:
+            raise ValueError(f"Invalid rule in layer {lid!r} at index {r_idx}: {err}") from err
 
-    Raises ValueError with a specific, human-readable error on any violation.
-    """
+
+def _validate_layer_record(
+    layer_record: Any, idx: int, seen_ids: set[str], seen_names: set[str], seen_orders: set[int]
+) -> str:
+    if not isinstance(layer_record, dict):
+        raise ValueError(f"Layer item at index {idx} must be an object")
+
+    lid = str(layer_record.get("id") or "").strip()
+    name = str(layer_record.get("name") or "").strip()
+    order = layer_record.get("order")
+
+    if not lid:
+        raise ValueError(f"Layer at index {idx} has an empty 'id'")
+    if lid in seen_ids:
+        raise ValueError(f"Duplicate layer id {lid!r} found at index {idx}")
+    seen_ids.add(lid)
+
+    if not name:
+        raise ValueError(f"Layer {lid!r} has an empty display 'name'")
+    if name in seen_names:
+        raise ValueError(f"Duplicate layer display name {name!r} found in layer {lid!r}")
+    seen_names.add(name)
+
+    if order is None or not isinstance(order, int):
+        raise ValueError(f"Layer {lid!r} has invalid 'order': expected integer, got {order!r}")
+    if order in seen_orders:
+        raise ValueError(f"Duplicate order {order} found in layer {lid!r}")
+    seen_orders.add(order)
+
+    _validate_layer_rules(layer_record.get("rules") or [], lid)
+    return lid
+
+
+def validate_layer_config(data: Mapping[str, Any]) -> None:
     if not isinstance(data, dict):
         raise ValueError("Layer configuration must be a mapping/object")
 
@@ -71,43 +110,7 @@ def validate_layer_config(data: Mapping[str, Any]) -> None:
     seen_orders: set[int] = set()
 
     for idx, layer_record in enumerate(layers):
-        if not isinstance(layer_record, dict):
-            raise ValueError(f"Layer item at index {idx} must be an object")
-
-        lid = str(layer_record.get("id") or "").strip()
-        name = str(layer_record.get("name") or "").strip()
-        order = layer_record.get("order")
-
-        if not lid:
-            raise ValueError(f"Layer at index {idx} has an empty 'id'")
-        if lid in seen_ids:
-            raise ValueError(f"Duplicate layer id {lid!r} found at index {idx}")
-        seen_ids.add(lid)
-
-        if not name:
-            raise ValueError(f"Layer {lid!r} has an empty display 'name'")
-        if name in seen_names:
-            raise ValueError(f"Duplicate layer display name {name!r} found in layer {lid!r}")
-        seen_names.add(name)
-
-        if order is None or not isinstance(order, int):
-            raise ValueError(f"Layer {lid!r} has invalid 'order': expected integer, got {order!r}")
-        if order in seen_orders:
-            raise ValueError(f"Duplicate order {order} found in layer {lid!r}")
-        seen_orders.add(order)
-
-        # Validate rules
-        rules = layer_record.get("rules") or []
-        if not isinstance(rules, list):
-            raise ValueError(f"Layer {lid!r} 'rules' must be a list")
-
-        for r_idx, rule_dict in enumerate(rules):
-            if not isinstance(rule_dict, dict):
-                raise ValueError(f"Rule at index {r_idx} in layer {lid!r} must be an object")
-            try:
-                Rule.from_record(rule_dict)
-            except Exception as err:
-                raise ValueError(f"Invalid rule in layer {lid!r} at index {r_idx}: {err}") from err
+        _validate_layer_record(layer_record, idx, seen_ids, seen_names, seen_orders)
 
     if utility_id not in seen_ids:
         raise ValueError(
