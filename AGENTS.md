@@ -4,7 +4,12 @@
 This repository is mapped into architectural layers designed from its own source,
 with per-symbol intents you can search and trace.
 
-**Before planning or implementing a feature**, trace it instead of grepping:
+### ⛔ FORBIDDEN TOOL BEHAVIORS
+- **DO NOT use `grep_search`, `ripgrep`, or `find_by_name` as your primary discovery tool.** Blind text searching is strictly prohibited for codebase exploration, feature lookup, and understanding component flows.
+- **DO NOT guess symbol locations or execution paths.**
+
+### ✅ MANDATORY FIRST-STEP PROTOCOL
+Whenever the user asks where a feature lives, how a component works, or what a symbol connects to, your first tool call MUST be `run_command` with one of the following:
 
 ```bash
 tldrgraph query "<feature in plain English>"   # semantic search + end-to-end flow
@@ -12,6 +17,10 @@ tldrgraph trace "<Source>" "<Target>"          # exact path between two symbols
 tldrgraph layers                               # node counts per layer
 tldrgraph dead-code                            # review candidates, never a delete list
 ```
+
+**Discovery Pattern**:
+1. Run `tldrgraph query "<query>"` or `tldrgraph trace "<from>" "<to>"` to identify the exact file, layer, and line range.
+2. Use `view_file` on the target file path returned by TLDRGraph to inspect the code.
 
 Those are read-only and never trigger enrichment.
 

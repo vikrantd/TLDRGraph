@@ -2212,15 +2212,7 @@ function populateDrawer(item) {
     metaRow('Node id', item.id)
   ].join('');
 
-  document.getElementById('drawer-intent').innerHTML = renderMarkdown(item.intent);
-
-  const summarySection = document.getElementById('drawer-summary-section');
-  const hasSummary = item.summary && item.summary.trim() &&
-                     item.summary.trim() !== String(item.intent || '').trim();
-  summarySection.style.display = hasSummary ? 'block' : 'none';
-  if (hasSummary) {
-    document.getElementById('drawer-summary').innerHTML = renderMarkdown(item.summary);
-  }
+  document.getElementById('drawer-intent').innerHTML = renderMarkdown(item.intent || '*(No intent documented)*');
 
   const inFields = item.input_fields || [];
   const outFields = item.output_fields || [];

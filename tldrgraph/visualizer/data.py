@@ -41,20 +41,20 @@ def _extract_snapshot(root_dir: str) -> Dict[str, Any]:
 
     loader = GraphLoader(root_dir)
     loader.load_or_extract(enrich_llm=False)
-    nodes = []
-    for nid, data in loader.graph.nodes(data=True):
-        f = data.get("file", "")
-        lbl = data.get("label", str(nid))
-        nodes.append({
-            "id": str(nid), "label": lbl, "display_label": data.get("display_label") or lbl,
-            "file": f, "layer": data.get("layer", "General / Utility"),
+    nodes = [
+        {
+            "id": str(nid), "label": data.get("label", str(nid)),
+            "display_label": data.get("display_label") or data.get("label", str(nid)),
+            "file": data.get("file", ""), "layer": data.get("layer", "General / Utility"),
             "layer_id": data.get("layer_id", "utility"), "type": data.get("type", "code"),
-            "summary": data.get("summary", ""), "intent": data.get("intent", ""),
-            "input_fields": data.get("input_fields", []), "output_fields": data.get("output_fields", []),
-            "fields": data.get("fields", []), "is_test": data.get("is_test", is_test_node(f, lbl)),
+            "intent": data.get("intent", ""), "input_fields": data.get("input_fields", []),
+            "output_fields": data.get("output_fields", []), "fields": data.get("fields", []),
+            "is_test": data.get("is_test", is_test_node(data.get("file", ""), data.get("label", str(nid)))),
             "source_location": data.get("source_location"), "dead_code_status": data.get("dead_code_status", "live"),
             "dead_code_reason": data.get("dead_code_reason", ""),
-        })
+        }
+        for nid, data in loader.graph.nodes(data=True)
+    ]
     edges = [
         {"source": str(u), "target": str(v), "relation": d.get("relation", "calls"), "confidence": float(d.get("confidence", 1.0))}
         for u, v, d in loader.graph.edges(data=True)
@@ -168,8 +168,7 @@ def _build_single_node_record(
         "type": n.get("type", "function"),
         "tier": 2,
         "is_test": test_flag,
-        "intent": n.get("intent") or n.get("summary") or f"`{label}` in `{fpath}`.",
-        "summary": n.get("summary") or "",
+        "intent": (n.get("intent") or "").strip(),
         "input_fields": n.get("input_fields") or [],
         "output_fields": n.get("output_fields") or [],
         "fields": n.get("fields") or [],
@@ -195,6 +194,7 @@ def _ensure_module_record(
     lid: str,
     layer_info: Dict[str, Any],
     test_flag: bool,
+    module_intent: str = "",
 ) -> None:
     if mod_id not in modules_by_id:
         mod_label = os.path.basename(fpath)
@@ -206,7 +206,7 @@ def _ensure_module_record(
             "layer": layer_info["name"],
             "tier": 1,
             "is_test": test_flag,
-            "intent": f"Module `{mod_label}` in {layer_info['name']}.",
+            "intent": module_intent,
             "path": fpath,
             "language": language_for(fpath),
             "subnodes": [],
@@ -219,15 +219,18 @@ def _build_nodes_and_modules(
     raw_nodes: List[Dict[str, Any]],
     layer_map: Dict[str, Dict[str, Any]],
     sources: SourceIndex,
+    file_intents: Optional[Dict[str, str]] = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
     """Returns ``(nodes_by_id, modules_by_id)`` with modules owning their subnodes."""
     modules_by_id: Dict[str, Dict[str, Any]] = {}
     nodes_by_id: Dict[str, Dict[str, Any]] = {}
+    f_intents = file_intents or {}
 
     for n in raw_nodes:
         node_rec, mod_id, lid, test_flag, layer_info = _build_single_node_record(n, layer_map, sources)
         nodes_by_id[node_rec["id"]] = node_rec
-        _ensure_module_record(modules_by_id, mod_id, node_rec["file"], lid, layer_info, test_flag)
+        mod_intent = f_intents.get(node_rec["file"], "")
+        _ensure_module_record(modules_by_id, mod_id, node_rec["file"], lid, layer_info, test_flag, mod_intent)
         modules_by_id[mod_id]["subnodes"].append(node_rec)
 
     return nodes_by_id, modules_by_id
@@ -332,56 +335,45 @@ def _serialize_modules(modules_by_id: Dict[str, Dict[str, Any]]) -> List[Dict[st
     """Converts the in-progress module dicts (with sets) into JSON-safe records."""
     return [
         {
-            "id": m["id"],
-            "label": m["label"],
-            "file": m["file"],
-            "path": m["path"],
-            "language": m["language"],
-            "layer_id": m["layer_id"],
-            "layer": m["layer"],
-            "tier": 1,
-            "is_test": m["is_test"],
-            "intent": m["intent"],
-            "subnode_count": len(m["subnodes"]),
-            "subnodes": m["subnodes"],
-            "inbound_modules": sorted(m["inbound_modules"]),
-            "outbound_modules": sorted(m["outbound_modules"]),
+            "id": m["id"], "label": m["label"], "file": m["file"], "path": m["path"],
+            "language": m["language"], "layer_id": m["layer_id"], "layer": m["layer"],
+            "tier": 1, "is_test": m["is_test"], "intent": m["intent"],
+            "subnode_count": len(m["subnodes"]), "subnodes": m["subnodes"],
+            "inbound_modules": sorted(m["inbound_modules"]), "outbound_modules": sorted(m["outbound_modules"]),
         }
         for m in modules_by_id.values()
     ]
 
 
-def prepare_visualizer_data(root_dir: str) -> Dict[str, Any]:
-    """
-    Builds the complete two-tier payload (layers, modules, nodes, edges, stats)
-    that gets inlined into the standalone HTML app.
-    """
-    load_layer_config(root_dir)
-
+def _load_or_extract_snapshot(root_dir: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     snapshot = _load_snapshot(root_dir)
-    raw_nodes = snapshot.get("nodes", [])
-    raw_edges = snapshot.get("edges", [])
-    if not raw_nodes:
-        snapshot = _extract_snapshot(root_dir)
-        raw_nodes = snapshot["nodes"]
-        raw_edges = snapshot["edges"]
+    nodes = snapshot.get("nodes", [])
+    edges = snapshot.get("edges", [])
+    if not nodes:
+        extracted = _extract_snapshot(root_dir)
+        nodes = extracted.get("nodes", [])
+        edges = extracted.get("edges", [])
+    return nodes, edges
 
+
+def prepare_visualizer_data(root_dir: str) -> Dict[str, Any]:
+    """Builds the complete two-tier payload inlined into the standalone HTML app."""
+    load_layer_config(root_dir)
+    raw_nodes, raw_edges = _load_or_extract_snapshot(root_dir)
+
+    file_intents = {n["file"]: n["intent"].strip() for n in raw_nodes if n.get("file") and n.get("intent")}
     renderable = [n for n in raw_nodes if _is_renderable_node(n)]
     layer_map = _build_layer_map(renderable)
 
     sources = SourceIndex(root_dir)
-    nodes_by_id, modules_by_id = _build_nodes_and_modules(renderable, layer_map, sources)
+    nodes_by_id, modules_by_id = _build_nodes_and_modules(renderable, layer_map, sources, file_intents)
     child_edges, module_edges = _build_edges(raw_edges, nodes_by_id, modules_by_id)
     modules = _serialize_modules(modules_by_id)
 
     active_layer_ids = {m["layer_id"] for m in modules}
-    layers = sorted(
-        (l for l in layer_map.values() if l["id"] in active_layer_ids),
-        key=lambda x: x["order"],
-    )
+    layers = sorted((l for l in layer_map.values() if l["id"] in active_layer_ids), key=lambda x: x["order"])
 
     return {
-        # Absolute root, so the app can build editor deep links per node.
         "root": os.path.abspath(root_dir),
         "layers": layers,
         "modules": modules,
