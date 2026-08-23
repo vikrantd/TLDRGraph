@@ -1,0 +1,75 @@
+version: 1
+utility_id: utility
+layers:
+- id: cli
+  name: 'Layer 1: CLI & Agent Surface'
+  order: 1
+  description: Command-line entry points, Click commands, agent loops, and installer
+    contracts.
+  rules:
+  - file_contains:
+    - cli.py
+    - cli_commands.py
+    - cli_agent_loop.py
+    - cli_enrichment.py
+    - agent_runner.py
+    - installer.py
+    - installer_contract.py
+    - agent_commands.py
+- id: pipeline
+  name: 'Layer 2: Pipeline & Ingestion'
+  order: 2
+  description: Graph build pipeline, AST ingestion from graphify, node registration,
+    and snapshot synchronization.
+  rules:
+  - file_contains:
+    - graph_loader.py
+    - node_registrar.py
+    - snapshot_sync.py
+    - cli_pipeline.py
+- id: engine
+  name: 'Layer 3: Analysis & Extraction Engine'
+  order: 3
+  description: Flow engine, multi-layer hierarchy builder, deterministic cross-layer
+    extractors, dead-code analysis, and classifier.
+  rules:
+  - file_contains:
+    - flow_engine.py
+    - flow_traversal.py
+    - hierarchy.py
+    - hierarchy_builder.py
+    - extractors
+    - deadcode.py
+    - labels.py
+    - classifier.py
+    - propose_layers.py
+- id: retrieval
+  name: 'Layer 4: Vector Index & Retrieval'
+  order: 4
+  description: Local hybrid vector store, dense embeddings, TF-IDF sparse index, hash-gated
+    cache, and call resolution.
+  rules:
+  - file_contains:
+    - vector_store.py
+    - vector_tfidf.py
+    - dense_embedder.py
+    - hash_gate.py
+    - call_resolver.py
+- id: visualizer
+  name: 'Layer 5: Visualization & Web UI'
+  order: 5
+  description: Interactive HTML graph visualizer, canvas rendering, data extraction,
+    and live source view server.
+  rules:
+  - file_contains:
+    - visualizer
+    - render.py
+    - palette.py
+    - source.py
+    - app.js
+    - sourceview.js
+- id: utility
+  name: 'Layer 6: Core Types & Utilities'
+  order: 6
+  description: Layer registry definitions, rule engines, path helpers, evidence detection,
+    and shared utilities.

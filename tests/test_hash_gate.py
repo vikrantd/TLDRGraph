@@ -4,7 +4,7 @@ Defect 4 -- the hash gate is content-blind, and legacy DBs lie.
 The gate hashes ``label + file_path``. Neither changes when someone edits the
 body of a function, so a node is never marked dirty and never re-enriched.
 graphify already publishes per-file content hashes in
-``graphify-out/manifest.json``; those must drive the signature instead.
+graphify's manifest; those must drive the signature instead.
 
 Separately, older databases are full of generated placeholder summaries
 ("Layer 3: Foo located at bar.ts") that look enriched to ``check_node``, so
@@ -28,7 +28,7 @@ from tldrgraph.hash_gate import HashGate
 
 def test_loader_loads_the_graphify_manifest(loader, mini_repo):
     assert hasattr(loader, "file_hashes"), (
-        "GraphLoader must load graphify-out/manifest.json into self.file_hashes"
+        "GraphLoader must load graphify's manifest into self.file_hashes"
     )
     manifest = mini_repo.read_manifest()
     for rel, entry in manifest.items():
@@ -129,7 +129,7 @@ def test_node_goes_dirty_when_semantic_hash_changes(mini_repo, no_network):
     is_dirty, _ = l2.hash_gate.check_node(nid, l2.node_signature(attrs))
 
     assert is_dirty, (
-        "a changed semantic_hash in graphify-out/manifest.json must mark the "
+        "a changed semantic_hash in graphify's manifest must mark the "
         "node dirty -- the gate is still hashing label+path"
     )
 

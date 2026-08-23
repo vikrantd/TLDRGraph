@@ -8,8 +8,11 @@ from tldrgraph.visualizer import build_layers_config, generate_visualizer_html
 
 
 def test_build_layers_config_default_registry():
-    cfg = build_layers_config()
-    assert len(cfg) == 6  # 6 non-utility layers in default registry
+    # An unconfigured repo now has a single "Unclassified" bucket, so the layer
+    # set under test has to be named explicitly.
+    with use_registry(default_registry()):
+        cfg = build_layers_config()
+    assert len(cfg) == 6  # 6 non-utility layers in the example registry
     assert cfg[0]["id"] == "ui"
     assert "color" in cfg[0]
     assert "border" in cfg[0]

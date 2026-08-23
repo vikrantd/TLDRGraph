@@ -16,6 +16,7 @@ from tldrgraph.classifier import LayerType, classify_node
 from tldrgraph.deadcode import compute_enrichment_coverage
 from tldrgraph.flow_engine import FlowEngine
 from tldrgraph.graph_loader import GraphLoader
+from tldrgraph.layer_config import save_layer_config
 from tldrgraph.layers import (
     LAYER_API,
     LAYER_ASYNC,
@@ -133,8 +134,9 @@ def test_registry_rejects_duplicate_ids_and_names():
 
 def test_layer_id_of_prefers_the_id_and_falls_back_to_the_display_name():
     assert layer_id_of({"layer_id": LAYER_API, "layer": "anything at all"}) == LAYER_API
-    # Legacy record: display name only.
-    assert layer_id_of({"layer": "Layer 2: API Gateway"}) == LAYER_API
+    # Legacy record: display name only, resolved against the active registry.
+    with use_registry(default_registry()):
+        assert layer_id_of({"layer": "Layer 2: API Gateway"}) == LAYER_API
     assert layer_id_of({}) == ""
     assert layer_id_of({"layer": "a layer nobody registered"}) == ""
 
@@ -286,10 +288,15 @@ def test_renaming_does_not_change_the_classification_of_a_real_repo(mini_repo):
             enrich_llm=False).nodes(data=True)
     }
 
-    with use_registry(_renamed_registry()) as renamed_registry:
-        graph = GraphLoader(str(mini_repo.root)).load_or_extract(enrich_llm=False, rebuild=True)
-        after = {nid: data["layer_id"] for nid, data in graph.nodes(data=True)}
-        display = {data["layer"] for _, data in graph.nodes(data=True)}
+    # The rename has to go through the config file, not an ambient registry:
+    # a layer set on disk is the source of truth and `load_or_extract` reloads
+    # it, which is exactly the behaviour worth pinning down here.
+    renamed_registry = _renamed_registry()
+    save_layer_config(str(mini_repo.root), renamed_registry)
+
+    graph = GraphLoader(str(mini_repo.root)).load_or_extract(enrich_llm=False, rebuild=True)
+    after = {nid: data["layer_id"] for nid, data in graph.nodes(data=True)}
+    display = {data["layer"] for _, data in graph.nodes(data=True)}
 
     assert after == before
     # The display names really did change -- the test above is not vacuous.

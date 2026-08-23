@@ -76,6 +76,15 @@ class Rule:
             return True
         return False
 
+    def _matches_label_inclusions(self, label: str) -> bool:
+        if self.label_contains and any(k in label for k in self.label_contains):
+            return True
+        if self.label_ends_with and any(label.endswith(k) for k in self.label_ends_with):
+            return True
+        if self._compiled_label_re and self._compiled_label_re.search(label):
+            return True
+        return False
+
     def _matches_inclusions(self, node_id: str, node_data: Mapping[str, Any],
                             file_path: str, label: str) -> bool:
         """Returns True if any positive predicate matches the node."""
@@ -89,13 +98,7 @@ class Rule:
             return True
         if self._compiled_path_re and self._compiled_path_re.search(file_path):
             return True
-        if self.label_contains and any(k in label for k in self.label_contains):
-            return True
-        if self.label_ends_with and any(label.endswith(k) for k in self.label_ends_with):
-            return True
-        if self._compiled_label_re and self._compiled_label_re.search(label):
-            return True
-        return False
+        return self._matches_label_inclusions(label)
 
     def matches(self, node_id: str, node_data: Mapping[str, Any]) -> bool:
         """Tests whether this rule matches the given node attributes."""

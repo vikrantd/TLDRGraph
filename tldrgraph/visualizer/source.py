@@ -191,6 +191,31 @@ def _leading_context(lines: List[str], start_idx: int) -> int:
     return idx
 
 
+def _resolve_symbol_start_line(
+    lines: List[str], recorded: Optional[int], name: str
+) -> Tuple[Optional[int], bool]:
+    if recorded and 1 <= recorded <= len(lines):
+        if not name or _declares(lines[recorded - 1], name):
+            return recorded, False
+
+    found = _find_declaration(lines, name)
+    if found is None:
+        return None, False
+    relocated = bool(recorded) and found != recorded
+    return found, relocated
+
+
+def _find_symbol_end_idx(lines: List[str], start_line: int, ext: str) -> int:
+    if ext in BRACE_EXTENSIONS:
+        return _find_end_by_braces(lines, start_line - 1)
+    if ext in INDENT_EXTENSIONS:
+        return _find_end_by_indent(lines, start_line - 1)
+    end_idx = _find_end_by_indent(lines, start_line - 1)
+    if end_idx <= start_line:
+        return min(len(lines), start_line - 1 + FALLBACK_WINDOW)
+    return end_idx
+
+
 class SourceIndex:
     """Reads and caches project files, and slices symbol bodies out of them."""
 
@@ -238,33 +263,13 @@ class SourceIndex:
             return None
 
         recorded = parse_line_number(source_location)
-        start_line: Optional[int] = None
-        relocated = False
-
-        if recorded and 1 <= recorded <= len(lines):
-            if not name or _declares(lines[recorded - 1], name):
-                start_line = recorded
-
+        start_line, relocated = _resolve_symbol_start_line(lines, recorded, name)
         if start_line is None:
-            found = _find_declaration(lines, name)
-            if found is None:
-                return None
-            start_line = found
-            relocated = bool(recorded) and found != recorded
+            return None
 
         start_idx = _leading_context(lines, start_line - 1)
         ext = _extension(rel_path)
-
-        if ext in BRACE_EXTENSIONS:
-            end_idx = _find_end_by_braces(lines, start_line - 1)
-        elif ext in INDENT_EXTENSIONS:
-            end_idx = _find_end_by_indent(lines, start_line - 1)
-        else:
-            end_idx = _find_end_by_indent(lines, start_line - 1)
-            if end_idx <= start_line:
-                end_idx = min(len(lines), start_line - 1 + FALLBACK_WINDOW)
-
-        end_idx = max(end_idx, start_line)
+        end_idx = max(_find_symbol_end_idx(lines, start_line, ext), start_line)
 
         # Trailing blank lines carry no information; drop them.
         while end_idx > start_idx and not lines[end_idx - 1].strip():

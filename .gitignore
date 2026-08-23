@@ -61,7 +61,7 @@ htmlcov/
 
 # Graphify / TLDRGraph analysis outputs & state
 graphify-out/
-.tldrgraph/
+# .tldrgraph/  # superseded by the TLDRGraph block below
 .codechakra/
 scratch/
 
@@ -82,3 +82,11 @@ Thumbs.db
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# BEGIN TLDRGRAPH
+# TLDRGraph analysis state. Generated artifacts are ignored; the agent
+# contract and layer map are committed so the whole team shares them.
+.tldrgraph/*
+!.tldrgraph/AGENT_CONTRACT.md
+!.tldrgraph/layers.config.yaml
+# END TLDRGRAPH

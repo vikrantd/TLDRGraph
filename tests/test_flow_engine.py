@@ -3,7 +3,7 @@ Regression tests for the TLDRGraph flow/query surface (``tldrgraph.flow_engine``
 
 Everything here is hermetic: a small synthetic graph plus a real
 ``LocalVectorStore`` written under pytest's ``tmp_path``. Nothing reads the real
-repository, the real ``graphify-out/`` or the real ``.tldrgraph/`` state, and
+repository or the real ``.tldrgraph/`` state, and
 nothing makes a network call. Fixtures are defined locally in this file on
 purpose -- the shared ``conftest.py`` is owned elsewhere.
 

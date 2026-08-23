@@ -13,7 +13,7 @@ Plus the installer, the `dead-code` review list, and the read-only guarantee on
 `query` / `trace` / `layers`.
 
 Fixtures are local to this module on purpose; nothing here reads the real repository,
-the real ``graphify-out/`` or the real ``.tldrgraph/``, and nothing makes a network call.
+the real repository or the real ``.tldrgraph/`` state, and nothing makes a network call.
 """
 
 import json
@@ -23,6 +23,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from conftest import write_example_layer_config
+from tldrgraph import paths
 from tldrgraph import cli as cli_module
 from tldrgraph import installer as installer_module
 from tldrgraph.cli import (
@@ -78,7 +80,8 @@ FILE_BODIES = {
 def loop_repo(tmp_path) -> Path:
     """A hermetic mini-repo with graphify output, rooted in tmp_path."""
     root = tmp_path / "looprepo"
-    (root / "graphify-out").mkdir(parents=True)
+    (root / paths.STATE_DIRNAME).mkdir(parents=True)
+    write_example_layer_config(root)
 
     for rel, body in FILE_BODIES.items():
         dest = root / rel
@@ -105,7 +108,7 @@ def loop_repo(tmp_path) -> Path:
         }
         for src, tgt, relation in LOOP_EDGES
     ]
-    (root / "graphify-out" / "graph.json").write_text(
+    (root / paths.STATE_DIRNAME / paths.GRAPHIFY_GRAPH_FILENAME).write_text(
         json.dumps({"directed": True, "nodes": nodes, "links": links}, indent=2),
         encoding="utf-8",
     )
@@ -382,7 +385,7 @@ def test_queue_orders_hubs_and_seams_before_leaves(run, state):
 
 def test_degree_is_recomputed_not_read_from_graphify(run, loop_repo, state):
     """graphify emits no `degree` key, so the raw value is 0 for every node."""
-    raw = json.loads((loop_repo / "graphify-out" / "graph.json").read_text(encoding="utf-8"))
+    raw = json.loads((loop_repo / paths.STATE_DIRNAME / paths.GRAPHIFY_GRAPH_FILENAME).read_text(encoding="utf-8"))
     assert all("degree" not in n for n in raw["nodes"])
 
     run("queue-enrichment", "--limit", "0")
@@ -587,13 +590,15 @@ def test_dead_code_has_no_delete_capability(run):
 def test_install_writes_claude_cursor_and_antigravity(tmp_path):
     written = installer_module.install_agent_rules(str(tmp_path))
 
+    # One body of instructions and one command, per tool. No tool gets bespoke
+    # prose and no tool gets a third artifact.
     expected = {
         "contract": ".tldrgraph/AGENT_CONTRACT.md",
-        "claude_skill": ".claude/skills/tldrgraph/SKILL.md",
-        "claude_md": "CLAUDE.md",
-        "cursor_rule": ".cursor/rules/tldrgraph.mdc",
-        "antigravity_rule": ".agents/rules/tldrgraph.md",
-        "antigravity_workflow": ".agents/workflows/tldrgraph.md",
+        "gitignore": ".gitignore",
+        "AGENTS.md (instructions, all agents)": "AGENTS.md",
+        "Claude Code (command)": ".claude/commands/tldrgraph-init.md",
+        "Cursor (command)": ".cursor/commands/tldrgraph-init.md",
+        "Antigravity (command)": ".agents/skills/tldrgraph-init/SKILL.md",
     }
     assert set(written) == set(expected)
     for key, rel in expected.items():
@@ -604,21 +609,25 @@ def test_install_writes_claude_cursor_and_antigravity(tmp_path):
 def test_every_rule_file_points_at_the_contract_and_the_loop(tmp_path):
     written = installer_module.install_agent_rules(str(tmp_path))
     for key, path in written.items():
-        if key == "contract":
+        # .gitignore is not an instruction file, and the contract is what the
+        # others point AT rather than a pointer itself.
+        if key in ("contract", "gitignore") or not os.path.isfile(path):
             continue
         text = Path(path).read_text(encoding="utf-8")
         assert "AGENT_CONTRACT.md" in text, key
-        assert "queue-enrichment" in text, key
-        assert "apply-enrichment" in text, key
+        assert "tldrgraph init" in text, key
 
 
 def test_rules_tell_the_agent_to_read_the_source_and_not_invent(tmp_path):
     written = installer_module.install_agent_rules(str(tmp_path))
-    for key in ("claude_skill", "claude_md", "cursor_rule", "antigravity_rule", "contract"):
-        text = Path(written[key]).read_text(encoding="utf-8").lower()
-        assert "read the source" in text or "read the actual source" in text, key
-        assert "invent" in text, key
-        assert "0.35" in text, key
+    contract = Path(written["contract"]).read_text(encoding="utf-8").lower()
+    assert "read the source" in contract or "read the actual source" in contract
+    assert "invent" in contract
+    assert "0.35" in contract
+
+    command = Path(written["Claude Code (command)"]).read_text(encoding="utf-8").lower()
+    assert "open the source file of every node" in command
+    assert "never invent" in command
 
 
 def test_install_is_idempotent(tmp_path):
@@ -639,9 +648,10 @@ def test_existing_claude_md_is_never_clobbered(tmp_path):
 
     installer_module.install_agent_rules(str(tmp_path))
     text = claude_md.read_text(encoding="utf-8")
+    # TLDRGraph no longer writes into CLAUDE.md -- AGENTS.md covers Claude Code
+    # along with every other tool -- but it must not damage what is there.
     assert "Hand-written house rules." in text
-    assert installer_module.CLAUDE_MD_BEGIN in text
-    assert installer_module.CLAUDE_MD_END in text
+    assert installer_module.CLAUDE_MD_BEGIN not in text
 
 
 def test_claude_md_section_is_replaced_in_place_not_appended(tmp_path):
@@ -650,11 +660,11 @@ def test_claude_md_section_is_replaced_in_place_not_appended(tmp_path):
 
     installer_module.install_agent_rules(str(tmp_path))
     installer_module.install_agent_rules(str(tmp_path))
-    text = claude_md.read_text(encoding="utf-8")
 
-    assert text.count(installer_module.CLAUDE_MD_BEGIN) == 1
-    assert text.count(installer_module.CLAUDE_MD_END) == 1
-    assert text.count("keep me") == 1
+    agents_md = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert agents_md.count(installer_module.CLAUDE_MD_BEGIN) == 1
+    assert agents_md.count(installer_module.CLAUDE_MD_END) == 1
+    assert claude_md.read_text(encoding="utf-8").count("keep me") == 1
 
 
 def test_upsert_preserves_text_after_the_managed_section():
@@ -703,8 +713,8 @@ def test_gitignore_warnings_are_empty_when_nothing_is_hidden(tmp_path):
 def test_install_command_lists_what_it_wrote(tmp_path):
     result = CliRunner().invoke(cli, ["install", "--path", str(tmp_path)])
     assert result.exit_code == 0
-    for key in ("contract", "claude_skill", "claude_md", "cursor_rule",
-                "antigravity_rule", "antigravity_workflow"):
+    for key in ("contract", "gitignore", "AGENTS.md",
+                "Claude Code (command)", "Cursor (command)", "Antigravity (command)"):
         assert key in result.output
 
 
@@ -721,7 +731,9 @@ def test_existing_command_names_are_preserved():
 def test_scan_still_accepts_rebuild(loop_repo):
     result = CliRunner().invoke(cli, ["scan", str(loop_repo), "--rebuild"])
     assert result.exit_code == 0, result.output
-    assert "Scan complete" in result.output
+    # `scan` is now an alias for `init`, which reports a status rather than a
+    # "complete" banner -- this repo has no layer set, so it asks for one.
+    assert "status:" in result.output
 
 
 def test_query_still_accepts_top_k_and_path(loop_repo):

@@ -14,6 +14,8 @@ import json
 import networkx as nx
 import pytest
 
+from conftest import write_example_layer_config
+from tldrgraph import paths
 from tldrgraph import extractors as ex
 from tldrgraph.classifier import LayerType, classify_node
 from tldrgraph.deadcode import (
@@ -644,8 +646,9 @@ def seam_loader(seam_repo, monkeypatch):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:9")
 
-    graphify = seam_repo / "graphify-out"
+    graphify = seam_repo / paths.STATE_DIRNAME
     graphify.mkdir(parents=True, exist_ok=True)
+    write_example_layer_config(seam_repo)
     nodes = [
         {"id": "ui_page", "label": "ApplicationsPage()", "file_type": "code",
          "source_file": "frontend/src/app/applications/page.tsx", "source_location": "L3"},
@@ -664,8 +667,8 @@ def seam_loader(seam_repo, monkeypatch):
                  "links": [{"source": "ctl", "target": "svc", "relation": "calls",
                             "confidence_score": 1.0}],
                  "hyperedges": []}
-    (graphify / "graph.json").write_text(json.dumps(graph_doc), encoding="utf-8")
-    (graphify / "manifest.json").write_text("{}", encoding="utf-8")
+    (graphify / paths.GRAPHIFY_GRAPH_FILENAME).write_text(json.dumps(graph_doc), encoding="utf-8")
+    (graphify / paths.GRAPHIFY_MANIFEST_FILENAME).write_text("{}", encoding="utf-8")
 
     return GraphLoader(str(seam_repo))
 

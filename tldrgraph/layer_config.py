@@ -14,10 +14,9 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 import yaml
 
 from .layers import (
-    DEFAULT_LAYERS,
     LAYER_UTILITY,
     LayerRegistry,
-    default_registry,
+    bootstrap_registry,
     set_registry,
 )
 from .rules import Rule
@@ -50,12 +49,51 @@ def compute_registry_hash(registry: LayerRegistry) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def validate_layer_config(data: Mapping[str, Any]) -> None:
-    """
-    Validates a raw layer configuration dictionary.
+def _validate_layer_rules(rules: Any, lid: str) -> None:
+    if not isinstance(rules, list):
+        raise ValueError(f"Layer {lid!r} 'rules' must be a list")
+    for r_idx, rule_dict in enumerate(rules):
+        if not isinstance(rule_dict, dict):
+            raise ValueError(f"Rule at index {r_idx} in layer {lid!r} must be an object")
+        try:
+            Rule.from_record(rule_dict)
+        except Exception as err:
+            raise ValueError(f"Invalid rule in layer {lid!r} at index {r_idx}: {err}") from err
 
-    Raises ValueError with a specific, human-readable error on any violation.
-    """
+
+def _validate_layer_record(
+    layer_record: Any, idx: int, seen_ids: set[str], seen_names: set[str], seen_orders: set[int]
+) -> str:
+    if not isinstance(layer_record, dict):
+        raise ValueError(f"Layer item at index {idx} must be an object")
+
+    lid = str(layer_record.get("id") or "").strip()
+    name = str(layer_record.get("name") or "").strip()
+    order = layer_record.get("order")
+
+    if not lid:
+        raise ValueError(f"Layer at index {idx} has an empty 'id'")
+    if lid in seen_ids:
+        raise ValueError(f"Duplicate layer id {lid!r} found at index {idx}")
+    seen_ids.add(lid)
+
+    if not name:
+        raise ValueError(f"Layer {lid!r} has an empty display 'name'")
+    if name in seen_names:
+        raise ValueError(f"Duplicate layer display name {name!r} found in layer {lid!r}")
+    seen_names.add(name)
+
+    if order is None or not isinstance(order, int):
+        raise ValueError(f"Layer {lid!r} has invalid 'order': expected integer, got {order!r}")
+    if order in seen_orders:
+        raise ValueError(f"Duplicate order {order} found in layer {lid!r}")
+    seen_orders.add(order)
+
+    _validate_layer_rules(layer_record.get("rules") or [], lid)
+    return lid
+
+
+def validate_layer_config(data: Mapping[str, Any]) -> None:
     if not isinstance(data, dict):
         raise ValueError("Layer configuration must be a mapping/object")
 
@@ -72,43 +110,7 @@ def validate_layer_config(data: Mapping[str, Any]) -> None:
     seen_orders: set[int] = set()
 
     for idx, layer_record in enumerate(layers):
-        if not isinstance(layer_record, dict):
-            raise ValueError(f"Layer item at index {idx} must be an object")
-
-        lid = str(layer_record.get("id") or "").strip()
-        name = str(layer_record.get("name") or "").strip()
-        order = layer_record.get("order")
-
-        if not lid:
-            raise ValueError(f"Layer at index {idx} has an empty 'id'")
-        if lid in seen_ids:
-            raise ValueError(f"Duplicate layer id {lid!r} found at index {idx}")
-        seen_ids.add(lid)
-
-        if not name:
-            raise ValueError(f"Layer {lid!r} has an empty display 'name'")
-        if name in seen_names:
-            raise ValueError(f"Duplicate layer display name {name!r} found in layer {lid!r}")
-        seen_names.add(name)
-
-        if order is None or not isinstance(order, int):
-            raise ValueError(f"Layer {lid!r} has invalid 'order': expected integer, got {order!r}")
-        if order in seen_orders:
-            raise ValueError(f"Duplicate order {order} found in layer {lid!r}")
-        seen_orders.add(order)
-
-        # Validate rules
-        rules = layer_record.get("rules") or []
-        if not isinstance(rules, list):
-            raise ValueError(f"Layer {lid!r} 'rules' must be a list")
-
-        for r_idx, rule_dict in enumerate(rules):
-            if not isinstance(rule_dict, dict):
-                raise ValueError(f"Rule at index {r_idx} in layer {lid!r} must be an object")
-            try:
-                Rule.from_record(rule_dict)
-            except Exception as err:
-                raise ValueError(f"Invalid rule in layer {lid!r} at index {r_idx}: {err}") from err
+        _validate_layer_record(layer_record, idx, seen_ids, seen_names, seen_orders)
 
     if utility_id not in seen_ids:
         raise ValueError(
@@ -121,12 +123,18 @@ def load_layer_config(root_dir: str = ".") -> Tuple[LayerRegistry, str]:
     Loads the layer configuration from .tldrgraph/layers.config.yaml (or .json).
 
     If found, validates and sets the active registry.
-    If absent, falls back to the default registry.
+
+    If absent, returns the single-bucket bootstrap registry. It deliberately does
+    NOT fall back to a plausible six-layer default: classifying a repository
+    against an architecture nobody derived from it produces a map that is wrong
+    everywhere it looks right. `tldrgraph init` stops and asks instead.
+
     Returns (registry, config_hash).
     """
     c_path = config_path(root_dir)
     if not c_path:
-        reg = default_registry()
+        reg = bootstrap_registry()
+        set_registry(reg)
         return reg, compute_registry_hash(reg)
 
     try:
@@ -150,13 +158,17 @@ def save_layer_config(root_dir: str, registry: LayerRegistry) -> str:
     """
     Persists a LayerRegistry into .tldrgraph/layers.config.yaml.
 
+    Every config that reaches this function was derived from the repository's
+    own source -- there is no template path any more -- so nothing here needs to
+    mark a config as second-class.
+
     Returns the written file path.
     """
     out_dir = os.path.join(os.path.abspath(root_dir), ".tldrgraph")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, CONFIG_FILENAME_YAML)
 
-    payload = {
+    payload: Dict[str, Any] = {
         "version": CONFIG_SCHEMA_VERSION,
         "utility_id": registry.utility_id,
         "layers": [layer.as_record() for layer in registry.ordered()],

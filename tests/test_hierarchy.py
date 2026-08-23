@@ -19,6 +19,8 @@ import json
 
 import pytest
 
+from conftest import write_example_layer_config
+from tldrgraph import paths
 from tldrgraph import extractors as ex
 from tldrgraph import labels as lb
 from tldrgraph.graph_loader import GraphLoader
@@ -136,8 +138,9 @@ def repo(tmp_path, monkeypatch):
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
 
-    graphify = root / "graphify-out"
+    graphify = root / paths.STATE_DIRNAME
     graphify.mkdir(parents=True, exist_ok=True)
+    write_example_layer_config(root)
     graph_doc = {
         "directed": True,
         "multigraph": False,
@@ -153,8 +156,8 @@ def repo(tmp_path, monkeypatch):
         ],
         "hyperedges": [],
     }
-    (graphify / "graph.json").write_text(json.dumps(graph_doc), encoding="utf-8")
-    (graphify / "manifest.json").write_text("{}", encoding="utf-8")
+    (graphify / paths.GRAPHIFY_GRAPH_FILENAME).write_text(json.dumps(graph_doc), encoding="utf-8")
+    (graphify / paths.GRAPHIFY_MANIFEST_FILENAME).write_text("{}", encoding="utf-8")
     return root
 
 
@@ -508,7 +511,7 @@ def test_parent_and_child_links_are_symmetric(hierarchy):
 def test_reading_the_snapshot_neither_doubles_seams_nor_buries_endpoints(repo):
     """
     ``build_multilayer_hierarchy`` prefers ``.tldrgraph/graph.json`` over
-    ``graphify-out/graph.json`` when it exists, and that snapshot carries both
+    graphify's raw export when it exists, and that snapshot carries both
     the synthesized endpoint nodes and the re-derivable seam edges. Reading it
     must not emit the seams twice, and must not fold endpoints back into the
     generic symbol tier.

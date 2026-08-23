@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Git pre-commit hook to verify code health rules and test integrity.
+
+set -e
+
+echo "🔍 Running TLDRGraph pre-commit code health check..."
+
+# Run code health linter
+python3 scripts/check_code_health.py --target-dir tldrgraph
+
+if [ $? -ne 0 ]; then
+    echo "❌ Pre-commit check failed: Code quality limits exceeded."
+    echo "Please ensure all files are < 400 lines and functions have complexity <= 15."
+    exit 1
+fi
+
+echo "✅ Code health check passed."
