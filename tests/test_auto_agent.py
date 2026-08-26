@@ -656,6 +656,16 @@ def test_every_agent_gets_an_identical_command(tmp_path):
     assert len(bodies) == 1, "command files have drifted apart"
 
 
+def test_codex_skill_matches_the_claude_command(tmp_path):
+    """Codex gets the same workflow through its supported repo-local skill path."""
+    agent_commands.install_agent_commands(str(tmp_path))
+
+    claude = tmp_path / ".claude" / "commands" / "tldrgraph-init.md"
+    codex = tmp_path / ".agents" / "skills" / "tldrgraph-init" / "SKILL.md"
+    assert codex.is_file()
+    assert codex.read_text(encoding="utf-8") == claude.read_text(encoding="utf-8")
+
+
 def test_no_tool_gets_a_bespoke_extra_artifact(tmp_path):
     """
     Claude used to get a skill AND a CLAUDE.md section AND a command, while

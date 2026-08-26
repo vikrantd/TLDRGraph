@@ -141,9 +141,14 @@ and one `tldrgraph-init` command, byte-identical everywhere.
 
 | Artifact | Where |
 | --- | --- |
-| **Instructions** | `AGENTS.md` — the cross-tool standard, read by Claude Code, Cursor, Antigravity, opencode, Codex, Gemini CLI, Zed and Copilot |
+| **Instructions** | `AGENTS.md` — the cross-tool standard, read by Claude Code, Cursor, Codex, Antigravity, opencode, Gemini CLI, Zed and Copilot |
 | | `.clinerules/`, `.windsurf/rules/` — only for tools not known to read AGENTS.md |
-| **Command** | `.claude/commands/`, `.cursor/commands/`, `.agents/skills/`, `.clinerules/workflows/`, `.windsurf/workflows/`, `.opencode/command/`, `.roo/commands/`, `.kilocode/workflows/`, `.goosehints/`, `.continue/prompts/` |
+| **Command / skill** | `.claude/commands/`, `.cursor/commands/`, `.agents/skills/` (Codex), `.clinerules/workflows/`, `.windsurf/workflows/`, `.opencode/command/`, `.roo/commands/`, `.kilocode/workflows/`, `.goosehints/`, `.continue/prompts/` |
+
+Codex intentionally uses `.agents/skills/tldrgraph-init/SKILL.md`, not a
+`.codex/commands/` mirror. This is Codex's supported repository-local skill
+location, and TLDRGraph writes the same workflow body there that it writes for
+Claude Code.
 
 Tools with a marker directory are installed only when the repo shows them in
 use; `tldrgraph install --all-agents` writes them all. Adding a tool is one row

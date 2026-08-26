@@ -327,7 +327,7 @@ def doctor(path, embeddings, as_json):
 @click.option("--all-agents", is_flag=True,
               help="Write the /tldrgraph-init command for every agent tool TLDRGraph knows.")
 def install(path, all_agents):
-    """Install TLDRGraph agent rules for Claude Code, Cursor and Antigravity."""
+    """Install TLDRGraph rules and workflows for Codex and other coding agents."""
     gitignore = ensure_gitignore(path)
     res = install_agent_rules(path, all_agents=all_agents)
     click.echo("✅ TLDRGraph agent skills & rules installed successfully:")
