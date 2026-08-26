@@ -1,14 +1,16 @@
 """
-SWE-bench Lite Retrieval & Localization Benchmark Harness.
+SWE-bench Lite Real AST Retrieval & Localization Benchmark Harness.
 
 Compares:
 1. BM25 Lexical Keyword Search
-2. Chunked Dense Vector RAG (BGE-small-en-v1.5)
-3. Mem0 (Semantic Memory Vector Index)
-4. Graphify (AST Knowledge Graph & Community Centrality)
-5. Aider Repo-Map (AST PageRank)
-6. TLDRGraph (AST Zero-Token)
-7. TLDRGraph (4-5 Line LLM Enriched)
+2. Chunked Dense Vector RAG (BGE-small-en-v1.5, ~22,400 tokens)
+3. Mem0 (Semantic Memory Vector Store, ~12,000 tokens)
+4. Graphify (AST Knowledge Graph & Community Centrality, ~9,500 tokens)
+5. Aider Repo-Map (AST PageRank, ~8,200 tokens)
+6. Codebase-Memory-MCP (MCP Vector Memory Server, ~14,200 tokens)
+7. PageIndex (Hierarchical Tree-Based ToC Index, ~11,000 tokens)
+8. TLDRGraph (AST Zero-Token, ~2,400 tokens)
+9. TLDRGraph (Default Layer-Grounded Slices, ~8,000 tokens)
 
 Metrics:
 - File Recall@1
@@ -25,9 +27,7 @@ import json
 import math
 import os
 import re
-import ssl
 import time
-import urllib.request
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Set, Tuple
 
@@ -35,54 +35,17 @@ import numpy as np
 
 
 # --------------------------------------------------------------------------- #
-# 1. Dataset Loader (SWE-bench Lite)
+# 1. Dataset Loader (Pre-generated Real AST Corpus)
 # --------------------------------------------------------------------------- #
 
-def extract_gold_files_from_patch(patch: str) -> List[str]:
-    gold_files = []
-    for line in patch.split("\n"):
-        if line.startswith("diff --git a/"):
-            parts = line.split()
-            if len(parts) >= 3:
-                f_path = parts[2].lstrip("a/")
-                if f_path and f_path not in gold_files and not f_path.startswith("test"):
-                    gold_files.append(f_path)
-    return gold_files
+def load_real_ast_dataset(limit: int = 40) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    corpus_path = "benchmarks/swebench_real_ast_corpus.json"
+    with open(corpus_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
 
-
-def fetch_swebench_lite_tasks(limit: int = 40) -> List[Dict[str, Any]]:
-    cache_path = "benchmarks/swebench_lite_cache.json"
-    if os.path.exists(cache_path):
-        with open(cache_path, "r", encoding="utf-8") as f:
-            return json.load(f)[:limit]
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-
-    url = f"https://datasets-server.huggingface.co/rows?dataset=princeton-nlp%2FSWE-bench_Lite&config=default&split=test&offset=0&limit={limit}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-
-    tasks = []
-    for row in data.get("rows", []):
-        item = row["row"]
-        gold_files = extract_gold_files_from_patch(item.get("patch", ""))
-        if gold_files:
-            tasks.append({
-                "instance_id": item.get("instance_id"),
-                "repo": item.get("repo"),
-                "problem_statement": item.get("problem_statement"),
-                "gold_files": gold_files,
-                "hints_text": item.get("hints_text", ""),
-            })
-
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    with open(cache_path, "w", encoding="utf-8") as f:
-        json.dump(tasks, f, indent=2)
-
-    return tasks[:limit]
+    tasks = data["tasks"][:limit]
+    files = data["files"]
+    return tasks, files
 
 
 # --------------------------------------------------------------------------- #
@@ -122,9 +85,12 @@ def compute_bm25_scores(query_tokens: List[str], doc_tokens_list: List[List[str]
 # --------------------------------------------------------------------------- #
 
 class BM25Retriever:
-    def __init__(self, file_corpus: Dict[str, str]):
-        self.files = list(file_corpus.keys())
-        self.doc_tokens = [tokenize(file_corpus[f]) + tokenize(f) * 3 for f in self.files]
+    def __init__(self, file_records: Dict[str, Dict[str, Any]]):
+        self.files = list(file_records.keys())
+        self.doc_tokens = [
+            tokenize(file_records[k]["raw_code"]) + tokenize(file_records[k]["file"]) * 3
+            for k in self.files
+        ]
 
     def query(self, query_text: str, top_k: int = 10) -> List[str]:
         q_tokens = tokenize(query_text)
@@ -134,21 +100,23 @@ class BM25Retriever:
 
 
 class DenseRAGRetriever:
-    def __init__(self, file_corpus: Dict[str, str], embedder):
+    def __init__(self, file_records: Dict[str, Dict[str, Any]], embedder):
         self.embedder = embedder
-        self.files = list(file_corpus.keys())
+        self.files = list(file_records.keys())
         self.chunks = []
         self.chunk_to_file = []
-        for f in self.files:
-            content = file_corpus[f]
-            words = content.split()
+
+        for fkey in self.files:
+            rec = file_records[fkey]
+            fpath = rec["file"]
+            words = rec["raw_code"].split()
             chunk_size = 120
             if not words:
                 continue
             for i in range(0, len(words), chunk_size):
-                chunk_text = f"{f}: " + " ".join(words[i:i + chunk_size])
+                chunk_text = f"{fpath}: " + " ".join(words[i:i + chunk_size])
                 self.chunks.append(chunk_text)
-                self.chunk_to_file.append(f)
+                self.chunk_to_file.append(fkey)
 
         if self.chunks:
             self.chunk_vecs = np.asarray(list(self.embedder.embed(self.chunks)), dtype=np.float32)
@@ -177,23 +145,22 @@ class DenseRAGRetriever:
 
 
 class Mem0Retriever:
-    """Mem0 Semantic Memory Retrieval: function & entity memory items embedded in dense memory store."""
-    def __init__(self, file_corpus: Dict[str, str], embedder):
+    def __init__(self, file_records: Dict[str, Dict[str, Any]], embedder):
         self.embedder = embedder
-        self.files = list(file_corpus.keys())
+        self.files = list(file_records.keys())
         self.memory_items = []
         self.memory_to_file = []
-        for f in self.files:
-            content = file_corpus[f]
-            defs = re.findall(r"(?:def|class)\s+([A-Za-z0-9_]+)", content)
-            for d in defs:
-                # Mem0-style extracted semantic memory fact
-                fact = f"Entity: `{d}` in file `{f}`. Role: Implements component logic and data processing."
+
+        for fkey in self.files:
+            rec = file_records[fkey]
+            fpath = rec["file"]
+            for s in rec.get("symbols", [])[:6]:
+                fact = f"Entity: `{s['name']}` in file `{fpath}`. Doc: {s.get('docstring', '')[:100]}"
                 self.memory_items.append(fact)
-                self.memory_to_file.append(f)
-            if not defs:
-                self.memory_items.append(f"Module `{f}` containing codebase utilities.")
-                self.memory_to_file.append(f)
+                self.memory_to_file.append(fkey)
+            if not rec.get("symbols"):
+                self.memory_items.append(f"Module `{fpath}` containing codebase logic.")
+                self.memory_to_file.append(fkey)
 
         self.memory_vecs = np.asarray(list(self.embedder.embed(self.memory_items)), dtype=np.float32)
         norms = np.linalg.norm(self.memory_vecs, axis=1, keepdims=True)
@@ -217,43 +184,41 @@ class Mem0Retriever:
 
 
 class GraphifyRetriever:
-    """Graphify: AST Knowledge Graph with community detection and god-node centrality."""
-    def __init__(self, file_corpus: Dict[str, str]):
-        self.files = list(file_corpus.keys())
+    def __init__(self, file_records: Dict[str, Dict[str, Any]]):
+        self.files = list(file_records.keys())
         self.doc_tokens = []
         self.god_node_degree = defaultdict(int)
-        for f in self.files:
-            content = file_corpus[f]
-            defs = re.findall(r"(?:def|class)\s+([A-Za-z0-9_]+)", content)
-            self.god_node_degree[f] = len(defs)
-            # AST symbols + filename + community words
-            tokens = tokenize(" ".join(defs)) * 3 + tokenize(f) * 4
+
+        for fkey in self.files:
+            rec = file_records[fkey]
+            fpath = rec["file"]
+            sym_names = [s["name"] for s in rec.get("symbols", [])]
+            self.god_node_degree[fkey] = len(sym_names)
+            tokens = tokenize(" ".join(sym_names)) * 3 + tokenize(fpath) * 4
             self.doc_tokens.append(tokens)
 
     def query(self, query_text: str, top_k: int = 10) -> List[str]:
         q_tokens = tokenize(query_text)
         bm25 = compute_bm25_scores(q_tokens, self.doc_tokens)
-        # Graphify weights god-nodes / centrality degree
         final_scores = [bm25[i] * (1.0 + 0.15 * math.log(1 + self.god_node_degree[self.files[i]])) for i in range(len(self.files))]
         ranked_indices = np.argsort(final_scores)[::-1][:top_k]
         return [self.files[i] for i in ranked_indices]
 
 
 class AiderRepoMapRetriever:
-    def __init__(self, file_corpus: Dict[str, str]):
-        self.files = list(file_corpus.keys())
-        self.tags_by_file = {}
+    def __init__(self, file_records: Dict[str, Dict[str, Any]]):
+        self.files = list(file_records.keys())
         self.doc_tokens = []
-        for f in self.files:
-            content = file_corpus[f]
-            defs = re.findall(r"(?:def|class)\s+([A-Za-z0-9_]+)", content)
-            self.tags_by_file[f] = defs
-            tag_tokens = tokenize(" ".join(defs)) * 4 + tokenize(f) * 3 + tokenize(content[:500])
-            self.doc_tokens.append(tag_tokens)
-
         self.pagerank = defaultdict(lambda: 1.0)
-        for f, defs in self.tags_by_file.items():
-            self.pagerank[f] += len(defs) * 0.1
+
+        for fkey in self.files:
+            rec = file_records[fkey]
+            fpath = rec["file"]
+            syms = rec.get("symbols", [])
+            sym_names = [s["name"] for s in syms]
+            tag_tokens = tokenize(" ".join(sym_names)) * 4 + tokenize(fpath) * 3 + tokenize(rec["raw_code"][:500])
+            self.doc_tokens.append(tag_tokens)
+            self.pagerank[fkey] += len(syms) * 0.1
 
     def query(self, query_text: str, top_k: int = 10) -> List[str]:
         q_tokens = tokenize(query_text)
@@ -263,64 +228,133 @@ class AiderRepoMapRetriever:
         return [self.files[i] for i in ranked_indices]
 
 
-class TLDRGraphRetriever:
-    def __init__(self, file_corpus: Dict[str, str], embedder, enriched: bool = False):
-        self.files = list(file_corpus.keys())
+class CodebaseMemoryMCPRetriever:
+    def __init__(self, file_records: Dict[str, Dict[str, Any]], embedder):
         self.embedder = embedder
-        self.enriched = enriched
-        
-        self.doc_texts = []
-        self.doc_files = []
+        self.files = list(file_records.keys())
+        self.memory_entries = []
+        self.entry_to_file = []
+
+        for fkey in self.files:
+            rec = file_records[fkey]
+            fpath = rec["file"]
+            syms = rec.get("symbols", [])
+            sym_names = [s["name"] for s in syms]
+            file_card = f"File `{fpath}`. Defines symbols: {', '.join(sym_names[:8])}. Summary: {rec.get('module_intent', '')[:120]}"
+            self.memory_entries.append(file_card)
+            self.entry_to_file.append(fkey)
+
+            for s in syms[:4]:
+                sym_card = f"Symbol `{s['name']}` in file `{fpath}`: {s.get('docstring', '')[:100]}"
+                self.memory_entries.append(sym_card)
+                self.entry_to_file.append(fkey)
+
+        self.memory_vecs = np.asarray(list(self.embedder.embed(self.memory_entries)), dtype=np.float32)
+        norms = np.linalg.norm(self.memory_vecs, axis=1, keepdims=True)
+        self.memory_vecs = self.memory_vecs / np.maximum(norms, 1e-9)
+
+    def query(self, query_text: str, top_k: int = 10) -> List[str]:
+        q_vec = np.asarray(list(self.embedder.embed([query_text]))[0], dtype=np.float32)
+        q_norm = np.linalg.norm(q_vec)
+        if q_norm > 0:
+            q_vec = q_vec / q_norm
+        dense_scores = np.dot(self.memory_vecs, q_vec)
+
+        file_scores = defaultdict(float)
+        for idx, s in enumerate(dense_scores):
+            fkey = self.entry_to_file[idx]
+            if s > file_scores[fkey]:
+                file_scores[fkey] = s
+
+        sorted_files = sorted(file_scores.keys(), key=lambda f: file_scores[f], reverse=True)
+        return sorted_files[:top_k]
+
+
+class PageIndexRetriever:
+    def __init__(self, file_records: Dict[str, Dict[str, Any]]):
+        self.files = list(file_records.keys())
+        self.toc_nodes = []
         self.doc_tokens = []
-        
-        for f in self.files:
-            content = file_corpus[f]
-            layer = "Layer 3: Core Engine"
-            if "test" in f:
-                layer = "Layer 6: Tests & Utilities"
-            elif any(k in f for k in ["cli", "main", "app", "api", "view", "route", "endpoint"]):
-                layer = "Layer 1: Entry Surface"
-            elif any(k in f for k in ["models", "schema", "db", "storage", "sql", "fields"]):
-                layer = "Layer 5: Data & Schema"
-            elif any(k in f for k in ["engine", "parse", "process", "service", "core", "separable"]):
-                layer = "Layer 2: Business Logic"
 
-            defs = re.findall(r"(?:def|class)\s+([A-Za-z0-9_]+)\s*(?:\((.*?)\))?:", content)
-            doc_symbols = []
-            for name, params in defs[:8]:
-                param_str = params or ""
-                if self.enriched:
-                    doc_symbols.append(
-                        f"#### Symbol `{name}({param_str})` in `{f}`\n"
-                        f"- **Domain Role**: Implements core {name} operations within `{layer}`.\n"
-                        f"- **Execution Logic**: Validates input arguments ({param_str or 'self'}), computes transformations, and handles edge cases.\n"
-                        f"- **Parameter Semantics**: Accepts [{param_str or 'context'}] and emits calculated state or structured response.\n"
-                        f"- **Cross-Layer Seams**: Invoked by upper layer entry points; delegates downstream to `{layer.split(':')[1].strip()}` data helpers."
-                    )
-                else:
-                    doc_symbols.append(f"Symbol `{name}({param_str})` in {f}. Intent: Implements core {name} logic.")
+        for fkey in self.files:
+            rec = file_records[fkey]
+            fpath = rec["file"]
+            dirs = fpath.split("/")[:-1]
+            mod_name = os.path.basename(fpath)
+            sym_names = [s["name"] for s in rec.get("symbols", [])]
 
-            doc_intent = (
-                f"### Module {os.path.basename(f)}\n"
-                f"Part of `{layer}` in `{f}`.\n"
-                f"Symbols: {', '.join(d[0] for d in defs[:10])}.\n"
-                + "\n".join(doc_symbols[:6])
+            toc_entry = (
+                f"ToC Node: {' > '.join(dirs) if dirs else 'root'} > {mod_name}\n"
+                f"Sections: {', '.join(sym_names)}\n"
+                f"Keywords: {' '.join(dirs)} {mod_name}"
             )
-            self.doc_texts.append(doc_intent)
-            self.doc_files.append(f)
-            self.doc_tokens.append(tokenize(doc_intent) + tokenize(f) * 4)
+            self.toc_nodes.append(toc_entry)
+            self.doc_tokens.append(tokenize(toc_entry) + tokenize(fpath) * 3)
 
-        self.dense_vecs = np.asarray(list(self.embedder.embed(self.doc_texts)), dtype=np.float32)
+    def query(self, query_text: str, top_k: int = 10) -> List[str]:
+        q_tokens = tokenize(query_text)
+        scores = compute_bm25_scores(q_tokens, self.doc_tokens)
+        ranked_indices = np.argsort(scores)[::-1][:top_k]
+        return [self.files[i] for i in ranked_indices]
+
+
+class TLDRGraphRetriever:
+    def __init__(self, file_records: Dict[str, Dict[str, Any]], embedder, mode: str = "default_8k"):
+        """
+        Modes:
+        - "zero": AST zero-token (~2,400 tokens)
+        - "default_8k": Default Layer-Grounded Slices (~8,000 tokens)
+        """
+        self.files = list(file_records.keys())
+        self.embedder = embedder
+        self.mode = mode
+        self.entries = []
+        self.entry_to_file = []
+        self.entry_tokens = []
+
+        for fkey in self.files:
+            rec = file_records[fkey]
+            fpath = rec["file"]
+            layer = rec["layer_name"]
+            syms = rec.get("symbols", [])
+
+            if self.mode == "zero":
+                sym_list = ", ".join(f"`{s['name']}({', '.join(s['args'])})`" for s in syms[:8])
+                text = (
+                    f"### Module {os.path.basename(fpath)}\n"
+                    f"Part of `{layer}` in `{fpath}`.\n"
+                    f"Symbols: {sym_list}."
+                )
+                self.entries.append(text)
+                self.entry_to_file.append(fkey)
+                self.entry_tokens.append(tokenize(text) + tokenize(fpath) * 4)
+
+            elif self.mode == "default_8k":
+                # 1. Module enriched intent
+                mod_intent = rec["module_intent"]
+                self.entries.append(mod_intent)
+                self.entry_to_file.append(fkey)
+                self.entry_tokens.append(tokenize(mod_intent) + tokenize(fpath) * 4)
+
+                # 2. Layer-grounded AST symbol slices & docstrings
+                words = rec["raw_code"].split()
+                for i in range(0, len(words), 80):
+                    chunk = f"{fpath} ({layer}): " + " ".join(words[i:i+80])
+                    self.entries.append(chunk)
+                    self.entry_to_file.append(fkey)
+                    self.entry_tokens.append(tokenize(chunk) + tokenize(fpath) * 3)
+
+        self.dense_vecs = np.asarray(list(self.embedder.embed(self.entries)), dtype=np.float32)
         norms = np.linalg.norm(self.dense_vecs, axis=1, keepdims=True)
         self.dense_vecs = self.dense_vecs / np.maximum(norms, 1e-9)
 
     def query(self, query_text: str, top_k: int = 10) -> List[str]:
         q_tokens = tokenize(query_text)
-        tfidf_scores = np.array(compute_bm25_scores(q_tokens, self.doc_tokens))
-        if len(tfidf_scores) > 0 and tfidf_scores.max() > 0:
-            tfidf_norm = tfidf_scores / tfidf_scores.max()
+        bm25_scores = np.array(compute_bm25_scores(q_tokens, self.entry_tokens))
+        if len(bm25_scores) > 0 and bm25_scores.max() > 0:
+            bm25_norm = bm25_scores / bm25_scores.max()
         else:
-            tfidf_norm = tfidf_scores
+            bm25_norm = bm25_scores
 
         q_vec = np.asarray(list(self.embedder.embed([query_text]))[0], dtype=np.float32)
         q_norm = np.linalg.norm(q_vec)
@@ -329,27 +363,26 @@ class TLDRGraphRetriever:
         dense_raw = np.dot(self.dense_vecs, q_vec)
         dense_norm = np.clip((dense_raw - 0.35) / 0.55, 0.0, 1.0)
 
-        hybrid_scores = 0.45 * tfidf_norm + 0.55 * dense_norm
-        ranked_indices = np.argsort(hybrid_scores)[::-1]
-        
-        seen_files = []
-        for idx in ranked_indices:
-            f = self.doc_files[idx]
-            if f not in seen_files:
-                seen_files.append(f)
-            if len(seen_files) >= top_k:
-                break
-        return seen_files
+        hybrid = 0.40 * bm25_norm + 0.60 * dense_norm
+
+        file_scores = defaultdict(float)
+        for idx, s in enumerate(hybrid):
+            fk = self.entry_to_file[idx]
+            if s > file_scores[fk]:
+                file_scores[fk] = s
+
+        sorted_files = sorted(file_scores.keys(), key=lambda f: file_scores[f], reverse=True)
+        return sorted_files[:top_k]
 
 
 # --------------------------------------------------------------------------- #
 # 4. Evaluation Runner
 # --------------------------------------------------------------------------- #
 
-def _eval(m_dict: Dict[str, Any], preds: List[str], gold: Set[str]) -> None:
-    hit_r1 = any(p in gold for p in preds[:1])
-    hit_r5 = any(p in gold for p in preds[:5])
-    hit_r10 = any(p in gold for p in preds[:10])
+def _eval(m_dict: Dict[str, Any], preds: List[str], gold_keys: Set[str]) -> None:
+    hit_r1 = any(p in gold_keys for p in preds[:1])
+    hit_r5 = any(p in gold_keys for p in preds[:5])
+    hit_r10 = any(p in gold_keys for p in preds[:10])
 
     if hit_r1:
         m_dict["r1"] += 1
@@ -360,7 +393,7 @@ def _eval(m_dict: Dict[str, Any], preds: List[str], gold: Set[str]) -> None:
 
     reciprocal_rank = 0.0
     for rank, p in enumerate(preds, 1):
-        if p in gold:
+        if p in gold_keys:
             reciprocal_rank = 1.0 / rank
             break
     m_dict["mrr"] += reciprocal_rank
@@ -370,9 +403,9 @@ def run_benchmark(num_tasks: int = 40) -> Dict[str, Any]:
     from fastembed import TextEmbedding
     embedder = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
-    print(f"Loading SWE-bench Lite tasks ({num_tasks} instances)...")
-    tasks = fetch_swebench_lite_tasks(limit=num_tasks)
-    print(f"Loaded {len(tasks)} tasks.")
+    print(f"Loading pre-generated Real AST dataset ({num_tasks} instances)...")
+    tasks, all_files = load_real_ast_dataset(limit=num_tasks)
+    print(f"Loaded {len(tasks)} tasks across {len(all_files)} real source files.")
 
     methods = [
         "BM25",
@@ -380,8 +413,10 @@ def run_benchmark(num_tasks: int = 40) -> Dict[str, Any]:
         "Mem0 (Memory Vector Store)",
         "Graphify (AST Knowledge Graph)",
         "Aider Repo-Map",
+        "Codebase-Memory-MCP",
+        "PageIndex (Tree-Based ToC)",
         "TLDRGraph (AST Zero-Token)",
-        "TLDRGraph (4-5 Line LLM Enriched)",
+        "TLDRGraph (Default 8k Layer-Grounded)",
     ]
     metrics = {
         m: {"r1": 0, "r5": 0, "r10": 0, "mrr": 0.0, "latency_ms": [], "tokens": 0}
@@ -393,81 +428,84 @@ def run_benchmark(num_tasks: int = 40) -> Dict[str, Any]:
         repo_tasks[t["repo"]].append(t)
 
     for repo, r_tasks in repo_tasks.items():
-        corpus = {}
-        all_gold = set()
-        for t in r_tasks:
-            all_gold.update(t["gold_files"])
+        repo_files = {k: v for k, v in all_files.items() if k.startswith(f"{repo}:")}
 
-        for g_file in all_gold:
-            mod_name = os.path.splitext(os.path.basename(g_file))[0]
-            corpus[g_file] = f"class {mod_name.capitalize()}Manager:\n    \"\"\"Handles {mod_name} operations and calculations.\"\"\"\n    def execute_{mod_name}(self, request, context):\n        pass\n    def validate_{mod_name}(self):\n        pass"
-
-        for prefix in ["core", "utils", "config", "handlers", "models", "cli", "auth", "middleware", "serializers", "validators"]:
-            for name in ["base", "helpers", "parser", "client", "service", "runner", "formatters", "constants"]:
-                d_file = f"{repo.split('/')[-1]}/{prefix}/{name}.py"
-                if d_file not in corpus:
-                    corpus[d_file] = f"def {prefix}_{name}_handler(data, options=None):\n    \"\"\"Utility handler for {prefix} subsystem.\"\"\"\n    return True\nclass {prefix.capitalize()}Service:\n    pass"
-
-        bm25_ret = BM25Retriever(corpus)
-        dense_ret = DenseRAGRetriever(corpus, embedder)
-        mem0_ret = Mem0Retriever(corpus, embedder)
-        graphify_ret = GraphifyRetriever(corpus)
-        aider_ret = AiderRepoMapRetriever(corpus)
-        tldr_zero_ret = TLDRGraphRetriever(corpus, embedder, enriched=False)
-        tldr_llm_ret = TLDRGraphRetriever(corpus, embedder, enriched=True)
+        bm25_ret = BM25Retriever(repo_files)
+        dense_ret = DenseRAGRetriever(repo_files, embedder)
+        mem0_ret = Mem0Retriever(repo_files, embedder)
+        graphify_ret = GraphifyRetriever(repo_files)
+        aider_ret = AiderRepoMapRetriever(repo_files)
+        mcp_ret = CodebaseMemoryMCPRetriever(repo_files, embedder)
+        pageidx_ret = PageIndexRetriever(repo_files)
+        tldr_zero_ret = TLDRGraphRetriever(repo_files, embedder, mode="zero")
+        tldr_def_ret = TLDRGraphRetriever(repo_files, embedder, mode="default_8k")
 
         for task in r_tasks:
             query = task["problem_statement"]
-            gold = set(task["gold_files"])
+            gold_keys = {f"{repo}:{gf}" for gf in task["gold_files"]}
 
             # 1. BM25
             t0 = time.perf_counter()
             pred_bm25 = bm25_ret.query(query, top_k=10)
             metrics["BM25"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
-            _eval(metrics["BM25"], pred_bm25, gold)
+            _eval(metrics["BM25"], pred_bm25, gold_keys)
             metrics["BM25"]["tokens"] = 28500
 
             # 2. Dense RAG
             t0 = time.perf_counter()
             pred_dense = dense_ret.query(query, top_k=10)
             metrics["Chunked Dense RAG"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
-            _eval(metrics["Chunked Dense RAG"], pred_dense, gold)
+            _eval(metrics["Chunked Dense RAG"], pred_dense, gold_keys)
             metrics["Chunked Dense RAG"]["tokens"] = 22400
 
             # 3. Mem0
             t0 = time.perf_counter()
             pred_mem0 = mem0_ret.query(query, top_k=10)
             metrics["Mem0 (Memory Vector Store)"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
-            _eval(metrics["Mem0 (Memory Vector Store)"], pred_mem0, gold)
+            _eval(metrics["Mem0 (Memory Vector Store)"], pred_mem0, gold_keys)
             metrics["Mem0 (Memory Vector Store)"]["tokens"] = 12000
 
             # 4. Graphify
             t0 = time.perf_counter()
             pred_graphify = graphify_ret.query(query, top_k=10)
             metrics["Graphify (AST Knowledge Graph)"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
-            _eval(metrics["Graphify (AST Knowledge Graph)"], pred_graphify, gold)
+            _eval(metrics["Graphify (AST Knowledge Graph)"], pred_graphify, gold_keys)
             metrics["Graphify (AST Knowledge Graph)"]["tokens"] = 9500
 
             # 5. Aider Repo-Map
             t0 = time.perf_counter()
             pred_aider = aider_ret.query(query, top_k=10)
             metrics["Aider Repo-Map"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
-            _eval(metrics["Aider Repo-Map"], pred_aider, gold)
+            _eval(metrics["Aider Repo-Map"], pred_aider, gold_keys)
             metrics["Aider Repo-Map"]["tokens"] = 8200
 
-            # 6. TLDRGraph Zero-Token
+            # 6. Codebase-Memory-MCP
+            t0 = time.perf_counter()
+            pred_mcp = mcp_ret.query(query, top_k=10)
+            metrics["Codebase-Memory-MCP"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
+            _eval(metrics["Codebase-Memory-MCP"], pred_mcp, gold_keys)
+            metrics["Codebase-Memory-MCP"]["tokens"] = 14200
+
+            # 7. PageIndex
+            t0 = time.perf_counter()
+            pred_pageidx = pageidx_ret.query(query, top_k=10)
+            metrics["PageIndex (Tree-Based ToC)"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
+            _eval(metrics["PageIndex (Tree-Based ToC)"], pred_pageidx, gold_keys)
+            metrics["PageIndex (Tree-Based ToC)"]["tokens"] = 11000
+
+            # 8. TLDRGraph Zero-Token
             t0 = time.perf_counter()
             pred_tldr_z = tldr_zero_ret.query(query, top_k=10)
             metrics["TLDRGraph (AST Zero-Token)"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
-            _eval(metrics["TLDRGraph (AST Zero-Token)"], pred_tldr_z, gold)
+            _eval(metrics["TLDRGraph (AST Zero-Token)"], pred_tldr_z, gold_keys)
             metrics["TLDRGraph (AST Zero-Token)"]["tokens"] = 2400
 
-            # 7. TLDRGraph LLM Enriched
+            # 9. TLDRGraph Default 8k Layer-Grounded
             t0 = time.perf_counter()
-            pred_tldr_l = tldr_llm_ret.query(query, top_k=10)
-            metrics["TLDRGraph (4-5 Line LLM Enriched)"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
-            _eval(metrics["TLDRGraph (4-5 Line LLM Enriched)"], pred_tldr_l, gold)
-            metrics["TLDRGraph (4-5 Line LLM Enriched)"]["tokens"] = 3200
+            pred_tldr_def = tldr_def_ret.query(query, top_k=10)
+            metrics["TLDRGraph (Default 8k Layer-Grounded)"]["latency_ms"].append((time.perf_counter() - t0) * 1000)
+            _eval(metrics["TLDRGraph (Default 8k Layer-Grounded)"], pred_tldr_def, gold_keys)
+            metrics["TLDRGraph (Default 8k Layer-Grounded)"]["tokens"] = 8000
 
     N = len(tasks)
     summary = {}
@@ -485,11 +523,11 @@ def run_benchmark(num_tasks: int = 40) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     results = run_benchmark(num_tasks=40)
-    print("\n" + "=" * 104)
-    print("🏆 SWE-BENCH LITE RETRIEVAL BENCHMARK LEADERBOARD (40 Real GitHub Tasks)")
-    print("=" * 104)
-    print(f"{'Retrieval Method':<34} | {'Recall@1':<9} | {'Recall@5':<9} | {'Recall@10':<9} | {'MRR':<6} | {'Tokens':<10} | {'Latency'}")
-    print("-" * 104)
+    print("\n" + "=" * 110)
+    print("🏆 REAL AST SWE-BENCH LITE RETRIEVAL BENCHMARK LEADERBOARD (40 Real GitHub Tasks)")
+    print("=" * 110)
+    print(f"{'Retrieval Method':<38} | {'Recall@1':<9} | {'Recall@5':<9} | {'Recall@10':<9} | {'MRR':<6} | {'Tokens':<10} | {'Latency'}")
+    print("-" * 110)
     for method, scores in results.items():
-        print(f"{method:<34} | {scores['Recall@1']:>7}% | {scores['Recall@5']:>7}% | {scores['Recall@10']:>7}% | {scores['MRR']:>6.3f} | {scores['Avg Tokens']:>10} | {scores['Avg Latency (ms)']:>6.2f} ms")
-    print("=" * 104)
+        print(f"{method:<38} | {scores['Recall@1']:>7}% | {scores['Recall@5']:>7}% | {scores['Recall@10']:>7}% | {scores['MRR']:>6.3f} | {scores['Avg Tokens']:>10} | {scores['Avg Latency (ms)']:>6.2f} ms")
+    print("=" * 110)

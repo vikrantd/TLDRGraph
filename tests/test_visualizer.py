@@ -91,3 +91,28 @@ def test_generated_html_contains_no_project_source(mini_repo):
             stripped = line.strip()
             if len(stripped) > 40 and "def " in stripped:
                 assert stripped not in content
+
+
+def test_workflows_payload_structure(mini_repo):
+    """Payload includes extracted workflow sequences mapping methods to files and layers."""
+    from tldrgraph.visualizer import prepare_visualizer_data
+
+    data = prepare_visualizer_data(str(mini_repo.root))
+    assert "workflows" in data
+    assert isinstance(data["workflows"], list)
+
+    for wf in data["workflows"]:
+        assert "id" in wf
+        assert "title" in wf
+        assert "root_node" in wf
+        assert "file" in wf
+        assert "layer" in wf
+        assert "steps" in wf
+        assert isinstance(wf["steps"], list)
+        for s in wf["steps"]:
+            assert "step_number" in s
+            assert "symbol" in s
+            assert "file" in s
+            assert "layer" in s
+            assert "node_id" in s
+

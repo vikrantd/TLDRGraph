@@ -99,6 +99,7 @@ class LocalVectorStore:
             )
         return self._embedder
 
+
     @property
     def backend(self) -> str:
         embedder = self.embedder
@@ -134,17 +135,22 @@ class LocalVectorStore:
         where = self._humanize(os.path.splitext(file_path)[0].replace("/", " "))
         intent = str(doc.get("intent") or "")
         summary = "" if intent else str(doc.get("summary") or "")
-        fields = doc.get("fields") or []
+        fields = doc.get("input_fields") or doc.get("fields") or []
         if isinstance(fields, (list, tuple)):
             fields = ", ".join(self._humanize(str(f)) for f in fields)
+        calls = doc.get("calls") or []
+        if isinstance(calls, (list, tuple)):
+            calls = ", ".join(self._humanize(str(c)) for c in calls[:6])
         parts = [p for p in (
             label,
             f"in {layer}" if layer else "",
             f"defined in {where}" if where else "",
             intent or summary,
-            f"fields: {fields}" if fields else "",
+            f"arguments: {fields}" if fields else "",
+            f"calls: {calls}" if calls else "",
         ) if p]
         return ". ".join(parts)
+
 
     @staticmethod
     def _content_hash(text: str) -> str:

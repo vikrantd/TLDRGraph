@@ -57,6 +57,7 @@ class DenseEmbedder:
         self.cache_dir = cache_dir or default_model_cache_dir()
         self.allow_download = allow_download
         self.reason = ""
+
         self.dim: Optional[int] = None
         self._model = None
         self._np = None

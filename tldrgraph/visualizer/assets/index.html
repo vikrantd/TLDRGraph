@@ -10,9 +10,20 @@
 </head>
 <body>
   <header>
-    <div class="brand">
-      <span class="brand-logo">🌐</span>
-      <span>TLDRGraph</span>
+    <div class="brand-group">
+      <div class="brand">
+        <span class="brand-logo">🌐</span>
+        <span>TLDRGraph</span>
+      </div>
+      <div class="nav-tabs" id="nav-tabs">
+        <button class="nav-tab active" id="tab-btn-canvas" title="Clustered Architecture Canvas">
+          <span class="tab-icon">🏛️</span> Architecture Map
+        </button>
+        <button class="nav-tab" id="tab-btn-flows" title="End-to-End Execution Workflows">
+          <span class="tab-icon">⚡</span> Workflows Explorer
+          <span class="tab-badge" id="flows-badge-count">0</span>
+        </button>
+      </div>
     </div>
 
     <div class="layer-legend" id="layer-legend"></div>
@@ -33,7 +44,7 @@
   </header>
 
   <main>
-    <div id="canvas-container">
+    <div id="canvas-container" class="view-panel active-view">
       <canvas id="main-canvas"></canvas>
 
       <div class="hud-controls">
@@ -56,6 +67,66 @@
 
       <div id="canvas-tooltip"></div>
     </div>
+
+    <div id="flows-container" class="view-panel flows-view" style="display:none;">
+      <canvas id="flow-canvas"></canvas>
+
+      <div class="flows-sidebar" id="flows-sidebar">
+        <div class="flows-search-container">
+          <div class="flows-search-box">
+            <span class="flows-search-icon">🔍</span>
+            <input type="text" id="flows-search-input" class="flows-search-input" placeholder="Search workflows, methods, files..." />
+            <button class="flows-clear-btn" id="flows-search-clear" style="display:none;">✕</button>
+          </div>
+        </div>
+        <div class="flows-list-header">
+          <span id="flows-list-count">Workflows (0)</span>
+          <span class="flows-vibe-tag">Architecture Flows</span>
+        </div>
+        <div class="flows-list" id="flows-list"></div>
+      </div>
+
+      <div class="flow-header-card" id="flow-header-card" style="display:none;">
+        <div class="flow-header-top">
+          <div class="flow-header-title-group">
+            <span class="flow-header-badge" id="flow-header-layer-badge">Layer 1</span>
+            <h2 id="flow-header-title">Workflow Title</h2>
+          </div>
+        </div>
+        <p class="flow-header-summary" id="flow-header-summary"></p>
+        <div class="flow-header-meta">
+          <span class="flow-meta-pill" id="flow-meta-steps">0 Steps</span>
+          <span class="flow-meta-pill" id="flow-meta-entry">Entry: symbol</span>
+          <div class="flow-meta-layers" id="flow-meta-layers"></div>
+        </div>
+      </div>
+
+      <div class="flows-empty-state" id="flows-empty-state">
+        <div class="flows-empty-icon">⚡</div>
+        <h3>Select a workflow to explore</h3>
+        <p>Trace complete end-to-end execution paths with all nodes and methods across layers on full canvas.</p>
+      </div>
+
+      <div class="flow-hud-controls" id="flow-hud-controls">
+        <button class="hud-btn" id="btn-flow-zoom-in" title="Zoom in">+</button>
+        <div class="hud-zoom-level" id="hud-flow-zoom-text">100%</div>
+        <button class="hud-btn" id="btn-flow-zoom-out" title="Zoom out">-</button>
+        <button class="hud-btn" id="btn-flow-fit" title="Fit to view">⛶</button>
+      </div>
+
+      <div id="flow-tooltip"></div>
+
+      <div class="flow-detail-toggle">
+        <button class="btn" id="btn-flow-detail">🔬 Internal steps: hidden</button>
+      </div>
+
+      <div class="flow-canvas-hint" id="flow-canvas-hint">
+        Follow the blue line of steps · Look below a step to see how it decides · Diamonds are decisions · Click any shape to inspect · Drag to pan
+      </div>
+    </div>
+
+
+
 
     <aside id="inspector-drawer" class="collapsed">
       <div class="drawer-header">

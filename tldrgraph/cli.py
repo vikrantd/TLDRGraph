@@ -79,6 +79,7 @@ from .propose_layers import (
     generate_propose_request,
 )
 from .visualizer import generate_visualizer_html
+from .cli_bpmn import run_apply_bpmn, run_bpmn_enrich
 
 embeddings_option = click.option(
     "--embeddings", "embeddings",
@@ -256,6 +257,34 @@ def apply_enrichment(enrichment_file, path):
     legacy response files when present.
     """
     run_apply_enrichment(path, enrichment_file)
+
+
+@cli.command("bpmn-enrich")
+@click.option("--path", default=".", help="Repository root path")
+@click.option("--limit", default=120, show_default=True,
+              help="Maximum shapes to queue in this batch.")
+def bpmn_enrich(path, limit):
+    """
+    Queue the workflow shapes that still speak in code, for the coding agent.
+
+    The AST pass has already worked out the true shape of every workflow - its
+    decisions, loops and error paths. This asks the agent to name them in business
+    language. Writes .tldrgraph/bpmn_request.yaml; the agent answers in
+    .tldrgraph/bpmn_response.yaml, which `apply-bpmn` then merges.
+    """
+    run_bpmn_enrich(path, limit)
+
+
+@cli.command("apply-bpmn")
+@click.option("--path", default=".", help="Repository root path")
+def apply_bpmn(path):
+    """
+    Apply the agent's workflow phrasing into .tldrgraph/bpmn_phrases.yaml.
+
+    Each phrase records the code it describes, so it is dropped automatically if
+    that code later changes rather than captioning logic it no longer matches.
+    """
+    run_apply_bpmn(path)
 
 
 @cli.command("dead-code")

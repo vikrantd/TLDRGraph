@@ -844,25 +844,28 @@ function drawArrow(fromX, fromY, toX, toY, color, size) {
   ctx.fill();
 }
 
-function roundRect(x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
-  ctx.closePath();
+// Both canvases share these helpers, so each one passes its own context.
+function roundRect(x, y, w, h, r, c) {
+  const g = c || ctx;
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.lineTo(x + w - r, y);
+  g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r);
+  g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  g.lineTo(x + r, y + h);
+  g.quadraticCurveTo(x, y + h, x, y + h - r);
+  g.lineTo(x, y + r);
+  g.quadraticCurveTo(x, y, x + r, y);
+  g.closePath();
 }
 
-function truncateText(str, maxW) {
+function truncateText(str, maxW, c) {
+  const g = c || ctx;
   const text = String(str === undefined || str === null ? '' : str);
-  if (ctx.measureText(text).width <= maxW) return text;
+  if (g.measureText(text).width <= maxW) return text;
   let s = text;
-  while (s.length > 1 && ctx.measureText(s + '...').width > maxW) {
+  while (s.length > 1 && g.measureText(s + '...').width > maxW) {
     s = s.slice(0, -1);
   }
   return s + '...';
@@ -1552,81 +1555,117 @@ function drawModuleCard(m) {
   ctx.globalAlpha = 1;
 }
 
-function drawNodeCard(n) {
-  if (n.expanded) { drawExpandedCard(n); return; }
+// One symbol card, drawn the same way on every canvas. The Architecture Map and
+// the Workflow Explorer both call this so a symbol looks identical in each view.
+function paintSymbolCard(c, n, opts) {
+  const o = opts || {};
   const layer = layerById[n.layer_id] || FALLBACK_COLOR;
-  const active = selectedId === n.id || focusId === n.id;
-  const isHovered = hoveredId === n.id;
-  const isNeighbour = focusUpstream.has(n.id) || focusDownstream.has(n.id);
-  const isDead = isDeadItem(n);
+  const active = !!o.active;
+  const isHovered = !!o.hovered;
+  const isNeighbour = !!o.neighbour;
+  // Emphasis lifts a card out of the crowd without changing its anatomy - the
+  // workflow spine uses it for the numbered steps.
+  const emphasis = !!o.emphasis;
+  const isDead = !!o.dead;
+  const w = o.w || n.w;
+  const h = o.h || n.h;
+  const left = o.x - w / 2;
+  const top = o.y - h / 2;
 
-  const left = n.renderX - n.w / 2;
-  const top = n.renderY - n.h / 2;
-
-  ctx.globalAlpha = n.renderOpacity;
-  roundRect(left, top, n.w, n.h, 7);
+  c.globalAlpha = o.opacity === undefined ? 1 : o.opacity;
+  roundRect(left, top, w, h, 7, c);
 
   if (active) {
-    ctx.fillStyle = '#1e293b';
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2.3;
-    ctx.shadowColor = '#38bdf8';
-    ctx.shadowBlur = 12;
+    c.fillStyle = '#1e293b';
+    c.strokeStyle = '#38bdf8';
+    c.lineWidth = 2.3;
+    c.shadowColor = '#38bdf8';
+    c.shadowBlur = 12;
   } else if (isHovered || isNeighbour) {
-    ctx.fillStyle = '#222842';
-    ctx.strokeStyle = layer.color;
-    ctx.lineWidth = 1.8;
-    ctx.shadowColor = layer.color;
-    ctx.shadowBlur = 6;
+    c.fillStyle = '#222842';
+    c.strokeStyle = layer.color;
+    c.lineWidth = 1.8;
+    c.shadowColor = layer.color;
+    c.shadowBlur = 6;
   } else if (isDead) {
-    ctx.fillStyle = '#181422';
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 1.4;
-    ctx.shadowBlur = 0;
+    c.fillStyle = '#181422';
+    c.strokeStyle = '#f59e0b';
+    c.lineWidth = 1.4;
+    c.shadowBlur = 0;
+  } else if (emphasis) {
+    c.fillStyle = '#1a2039';
+    c.strokeStyle = layer.color;
+    c.lineWidth = 1.8;
+    c.shadowColor = layer.glow || layer.color;
+    c.shadowBlur = 10;
   } else {
-    ctx.fillStyle = '#141829';
-    ctx.strokeStyle = layer.border;
-    ctx.lineWidth = 1.2;
-    ctx.shadowBlur = 0;
+    c.fillStyle = '#141829';
+    c.strokeStyle = layer.border;
+    c.lineWidth = 1.2;
+    c.shadowBlur = 0;
   }
-  ctx.fill();
-  ctx.stroke();
-  ctx.shadowBlur = 0;
+  c.fill();
+  c.stroke();
+  c.shadowBlur = 0;
 
   const kind = symbolKind(n);
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = active ? '#38bdf8' : kind.color;
-  ctx.font = 'bold 9px monospace';
-  ctx.fillText(kind.text, left + 9, top + 18);
+  c.textAlign = 'left';
+  c.textBaseline = 'middle';
+  c.fillStyle = active ? '#38bdf8' : kind.color;
+  c.font = 'bold 9px monospace';
+  c.fillText(kind.text, left + 9, top + 18);
 
-  ctx.fillStyle = '#f8fafc';
-  ctx.font = 'bold 12px -apple-system, sans-serif';
-  ctx.fillText(truncateText(n.display_label || n.label, n.w - 48), left + 34, top + 18);
+  // An optional marker (the workflow step number) sits where nothing else does.
+  let titleRight = 48;
+  if (o.badge) {
+    c.textAlign = 'right';
+    c.font = 'bold 9px monospace';
+    c.fillStyle = layer.color;
+    c.fillText(o.badge, left + w - 9, top + 18);
+    titleRight = 48 + c.measureText(o.badge).width + 10;
+  }
 
-  ctx.fillStyle = '#94a3b8';
-  ctx.font = '10px monospace';
-  ctx.fillText(truncateText(baseName(n.file), n.w - 74), left + 9, top + 38);
+  c.textAlign = 'left';
+  c.fillStyle = '#f8fafc';
+  c.font = 'bold 12px -apple-system, sans-serif';
+  c.fillText(truncateText(n.display_label || n.label, w - titleRight, c), left + 34, top + 18);
 
-  ctx.textAlign = 'right';
-  ctx.font = '9px monospace';
-  let chipX = left + n.w - 9;
+  c.fillStyle = '#94a3b8';
+  c.font = '10px monospace';
+  c.fillText(truncateText(baseName(n.file), w - 74, c), left + 9, top + 38);
+
+  c.textAlign = 'right';
+  c.font = '9px monospace';
+  let chipX = left + w - 9;
   if (isDead) {
-    ctx.fillStyle = '#f59e0b';
-    ctx.fillText('⚠️ dead', chipX, top + 38);
+    c.fillStyle = '#f59e0b';
+    c.fillText('\u26a0\ufe0f dead', chipX, top + 38);
     chipX -= 44;
   }
   if ((n.output_fields || []).length) {
-    ctx.fillStyle = '#c084fc';
-    ctx.fillText('out', chipX, top + 38);
+    c.fillStyle = '#c084fc';
+    c.fillText('out', chipX, top + 38);
     chipX -= 26;
   }
   if ((n.input_fields || []).length) {
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillText('in', chipX, top + 38);
+    c.fillStyle = '#38bdf8';
+    c.fillText('in', chipX, top + 38);
   }
 
-  ctx.globalAlpha = 1;
+  c.globalAlpha = 1;
+}
+
+function drawNodeCard(n) {
+  if (n.expanded) { drawExpandedCard(n); return; }
+  paintSymbolCard(ctx, n, {
+    x: n.renderX,
+    y: n.renderY,
+    opacity: n.renderOpacity,
+    active: selectedId === n.id || focusId === n.id,
+    hovered: hoveredId === n.id,
+    neighbour: focusUpstream.has(n.id) || focusDownstream.has(n.id),
+    dead: isDeadItem(n),
+  });
 }
 
 function drawCanvas() {
@@ -2567,10 +2606,1096 @@ document.getElementById('btn-center-node').addEventListener('click', () => {
   if (selectedId) centerOn(selectedId, true);
 });
 
-window.addEventListener('resize', () => {
-  resize();
-  fitToVisible(false);
-});
+// -------------------------------------------------------------
+// 9. Workflows Explorer (Vibe Coder Multi-Step Flow Visualization)
+// -------------------------------------------------------------
+let activeTab = 'canvas';
+let activeWorkflowId = null;
+let activeFlowLayerFilter = 'all';
+let flowSearchQuery = '';
+
+const tabBtnCanvas = document.getElementById('tab-btn-canvas');
+const tabBtnFlows = document.getElementById('tab-btn-flows');
+const canvasContainer = document.getElementById('canvas-container');
+const flowsContainer = document.getElementById('flows-container');
+
+function switchTab(tab) {
+  activeTab = tab;
+  if (tab === 'canvas') {
+    if (tabBtnCanvas) tabBtnCanvas.classList.add('active');
+    if (tabBtnFlows) tabBtnFlows.classList.remove('active');
+    if (canvasContainer) canvasContainer.style.display = 'block';
+    if (flowsContainer) flowsContainer.style.display = 'none';
+    resize();
+  } else {
+    if (tabBtnFlows) tabBtnFlows.classList.add('active');
+    if (tabBtnCanvas) tabBtnCanvas.classList.remove('active');
+    if (canvasContainer) canvasContainer.style.display = 'none';
+    if (flowsContainer) flowsContainer.style.display = 'flex';
+    if (!activeWorkflowId && DATA.workflows && DATA.workflows.length > 0) {
+      selectWorkflow(DATA.workflows[0].id);
+    }
+  }
+}
+
+function getLayerColor(layerId) {
+  const l = layerById[layerId];
+  return l ? l.color : '#94a3b8';
+}
+
+function initWorkflowsExplorer() {
+  const workflows = DATA.workflows || [];
+  const badgeEl = document.getElementById('flows-badge-count');
+  if (badgeEl) badgeEl.textContent = workflows.length;
+
+  const countEl = document.getElementById('flows-list-count');
+  if (countEl) countEl.textContent = `Workflows (${workflows.length})`;
+
+  // Setup search input
+  const searchInput = document.getElementById('flows-search-input');
+  const searchClear = document.getElementById('flows-search-clear');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      flowSearchQuery = searchInput.value.trim().toLowerCase();
+      if (searchClear) searchClear.style.display = flowSearchQuery ? 'block' : 'none';
+      renderWorkflowsList();
+    });
+  }
+  if (searchClear) {
+    searchClear.addEventListener('click', () => {
+      if (searchInput) searchInput.value = '';
+      flowSearchQuery = '';
+      searchClear.style.display = 'none';
+      renderWorkflowsList();
+    });
+  }
+
+  // HUD controls for workflow canvas
+  const btnFlowZoomIn = document.getElementById('btn-flow-zoom-in');
+  const btnFlowZoomOut = document.getElementById('btn-flow-zoom-out');
+  const btnFlowFit = document.getElementById('btn-flow-fit');
+  if (btnFlowZoomIn) btnFlowZoomIn.addEventListener('click', () => { flowTargetScale = Math.min(2.5, flowTargetScale * 1.25); requestFlowFrame(); });
+  if (btnFlowZoomOut) btnFlowZoomOut.addEventListener('click', () => { flowTargetScale = Math.max(0.15, flowTargetScale * 0.8); requestFlowFrame(); });
+  if (btnFlowFit) btnFlowFit.addEventListener('click', () => fitWorkflowView(true));
+
+  const btnDetail = document.getElementById('btn-flow-detail');
+  if (btnDetail) {
+    const sync = () => {
+      btnDetail.textContent = flowDetail === 'full' ? '🔬 Showing every step' : '🔬 Showing the decisions';
+      btnDetail.classList.toggle('active', flowDetail === 'full');
+    };
+    sync();
+    btnDetail.addEventListener('click', () => {
+      flowDetail = flowDetail === 'full' ? 'simple' : 'full';
+      sync();
+      if (activeWorkflowId) selectWorkflow(activeWorkflowId);
+    });
+  }
+
+  initWorkflowCanvasEvents();
+
+  if (tabBtnCanvas) tabBtnCanvas.addEventListener('click', () => switchTab('canvas'));
+  if (tabBtnFlows) tabBtnFlows.addEventListener('click', () => switchTab('flows'));
+
+  renderWorkflowsList();
+}
+
+function renderWorkflowsList() {
+  const listEl = document.getElementById('flows-list');
+  if (!listEl) return;
+
+  const workflows = (DATA.workflows || []).filter(w => {
+    if (!flowSearchQuery) return true;
+    const matchTitle = (w.title || '').toLowerCase().includes(flowSearchQuery);
+    const matchRoot = (w.root_node || '').toLowerCase().includes(flowSearchQuery);
+    const matchFile = (w.file || '').toLowerCase().includes(flowSearchQuery);
+    const matchSummary = (w.summary || '').toLowerCase().includes(flowSearchQuery);
+    const matchSteps = (w.steps || []).some(s => 
+      (s.symbol || '').toLowerCase().includes(flowSearchQuery) || 
+      (s.file || '').toLowerCase().includes(flowSearchQuery)
+    );
+    return matchTitle || matchRoot || matchFile || matchSummary || matchSteps;
+  });
+
+  const countEl = document.getElementById('flows-list-count');
+  if (countEl) countEl.textContent = `Workflows (${workflows.length})`;
+
+  if (workflows.length === 0) {
+    listEl.innerHTML = `<div style="padding: 16px; text-align: center; font-size: 12px; color: var(--text-dim);">No matching workflows found.</div>`;
+    return;
+  }
+
+  listEl.innerHTML = workflows.map(w => {
+    const isActive = w.id === activeWorkflowId;
+    const lColor = getLayerColor(w.layer_id);
+    const layerBadges = (w.layers_involved || []).slice(0, 3).map(lname => {
+      return `<span class="flow-layer-badge" style="background: rgba(255,255,255,0.08);">${escapeHtml(lname)}</span>`;
+    }).join('');
+
+    return `
+      <div class="flow-card ${isActive ? 'active' : ''}" data-flow-id="${w.id}">
+        <div class="flow-card-top">
+          <span class="flow-card-title">${escapeHtml(w.title)}</span>
+          <span class="flow-card-steps-count">${w.step_count} steps</span>
+        </div>
+        <div class="flow-card-meta">
+          <span class="flow-layer-badge" style="background: ${lColor};">${escapeHtml(w.layer || 'Layer')}</span>
+          <span class="flow-card-file">${escapeHtml(w.file)}</span>
+        </div>
+        <div class="flow-card-summary">${escapeHtml(w.summary || '')}</div>
+        <div class="flow-card-layers">${layerBadges}</div>
+      </div>
+    `;
+  }).join('');
+
+  listEl.querySelectorAll('.flow-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const flowId = card.getAttribute('data-flow-id');
+      selectWorkflow(flowId);
+    });
+  });
+}
+
+let flowCanvas = null;
+let flowCtx = null;
+let flowWidth = 800;
+let flowHeight = 600;
+let flowDpr = 1;
+let flowPanX = 0;
+let flowPanY = 0;
+let flowScale = 1;
+let flowTargetPanX = 0;
+let flowTargetPanY = 0;
+let flowTargetScale = 1;
+let flowDragStartX = 0;
+let flowDragStartY = 0;
+let flowPointerMode = null;      // 'pan' | 'node'
+let flowPointerMoved = false;
+let flowPointerStart = { x: 0, y: 0 };
+let flowDragNode = null;
+let flowDragOffset = { x: 0, y: 0 };
+let flowHoverNodeId = null;
+let flowSelectedNodeId = null;
+let flowNodes = [];
+let flowEdges = [];
+let flowBounds = { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+let flowAnimFrame = null;
+
+function initWorkflowCanvasEvents() {
+  flowCanvas = document.getElementById('flow-canvas');
+  if (!flowCanvas) return;
+  flowCtx = flowCanvas.getContext('2d');
+
+  function getMousePos(ev) {
+    const rect = flowCanvas.getBoundingClientRect();
+    return {
+      x: (ev.clientX - rect.left),
+      y: (ev.clientY - rect.top)
+    };
+  }
+
+  function screenToWorld(sx, sy) {
+    return {
+      x: (sx - flowPanX) / flowScale,
+      y: (sy - flowPanY) / flowScale
+    };
+  }
+
+  function flowHitTest(sx, sy) {
+    const world = screenToWorld(sx, sy);
+    // Reverse order so the topmost drawn card wins the hit.
+    for (let i = flowNodes.length - 1; i >= 0; i--) {
+      const n = flowNodes[i];
+      if (world.x >= n.x - n.w / 2 && world.x <= n.x + n.w / 2 &&
+          world.y >= n.y - n.h / 2 && world.y <= n.y + n.h / 2) {
+        return n;
+      }
+    }
+    return null;
+  }
+
+  flowCanvas.addEventListener('pointerdown', (ev) => {
+    if (ev.button !== 0 && ev.button !== 1) return;
+    ev.preventDefault();
+    try { flowCanvas.setPointerCapture(ev.pointerId); } catch (err) { /* not capturable */ }
+
+    const pos = getMousePos(ev);
+    flowPointerStart = pos;
+    flowPointerMoved = false;
+
+    const hit = ev.button === 1 ? null : flowHitTest(pos.x, pos.y);
+    if (hit) {
+      flowPointerMode = 'node';
+      flowDragNode = hit;
+      const world = screenToWorld(pos.x, pos.y);
+      flowDragOffset = { x: world.x - hit.x, y: world.y - hit.y };
+    } else {
+      flowPointerMode = 'pan';
+      flowDragStartX = pos.x;
+      flowDragStartY = pos.y;
+      flowCanvas.style.cursor = 'grabbing';
+    }
+  });
+
+  flowCanvas.addEventListener('pointermove', (ev) => {
+    const pos = getMousePos(ev);
+
+    if (flowPointerMode && !flowPointerMoved) {
+      const dist = Math.hypot(pos.x - flowPointerStart.x, pos.y - flowPointerStart.y);
+      if (dist > DRAG_THRESHOLD) flowPointerMoved = true;
+    }
+
+    if (flowPointerMode === 'pan') {
+      hideFlowTooltip();
+      const dx = pos.x - flowDragStartX;
+      const dy = pos.y - flowDragStartY;
+      flowDragStartX = pos.x;
+      flowDragStartY = pos.y;
+      flowPanX += dx;
+      flowPanY += dy;
+      flowTargetPanX = flowPanX;
+      flowTargetPanY = flowPanY;
+      requestFlowFrame();
+      return;
+    }
+
+    if (flowPointerMode === 'node' && flowDragNode) {
+      if (!flowPointerMoved) return;
+      hideFlowTooltip();
+      flowCanvas.style.cursor = 'grabbing';
+      const world = screenToWorld(pos.x, pos.y);
+      flowDragNode.x = world.x - flowDragOffset.x;
+      flowDragNode.y = world.y - flowDragOffset.y;
+      requestFlowFrame();
+      return;
+    }
+
+    const hit = flowHitTest(pos.x, pos.y);
+    const hitId = hit ? hit.id : null;
+    if (hitId !== flowHoverNodeId) {
+      flowHoverNodeId = hitId;
+      flowCanvas.style.cursor = hit ? 'pointer' : 'grab';
+      requestFlowFrame();
+    }
+    if (hit) showFlowTooltip(hit, pos.x, pos.y);
+    else hideFlowTooltip();
+  });
+
+  function endFlowPointer(ev) {
+    if (!flowPointerMode) return;
+
+    if (!flowPointerMoved && flowPointerMode === 'node' && flowDragNode) {
+      flowSelectedNodeId = flowDragNode.id;
+      if (flowDragNode.node_id) selectItem(flowDragNode.node_id, false);
+    } else if (flowPointerMoved && flowPointerMode === 'node') {
+      // A moved card can sit outside the old extent, so refresh what "fit" means.
+      recomputeFlowBounds();
+    }
+
+    flowPointerMode = null;
+    flowDragNode = null;
+    flowCanvas.style.cursor = flowHoverNodeId ? 'pointer' : 'grab';
+    requestFlowFrame();
+    if (ev && ev.pointerId !== undefined && flowCanvas.hasPointerCapture &&
+        flowCanvas.hasPointerCapture(ev.pointerId)) {
+      flowCanvas.releasePointerCapture(ev.pointerId);
+    }
+  }
+
+  flowCanvas.addEventListener('pointerleave', hideFlowTooltip);
+  flowCanvas.addEventListener('pointerup', endFlowPointer);
+  flowCanvas.addEventListener('pointercancel', endFlowPointer);
+  flowCanvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+  flowCanvas.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const pos = getMousePos(ev);
+    const zoomFactor = ev.deltaY < 0 ? 1.15 : 0.87;
+    const newScale = Math.max(0.15, Math.min(2.5, flowTargetScale * zoomFactor));
+
+    const worldBefore = screenToWorld(pos.x, pos.y);
+    flowTargetScale = newScale;
+    flowScale = newScale;
+    flowPanX = pos.x - worldBefore.x * newScale;
+    flowPanY = pos.y - worldBefore.y * newScale;
+    flowTargetPanX = flowPanX;
+    flowTargetPanY = flowPanY;
+    requestFlowFrame();
+  }, { passive: false });
+
+  flowCanvas.addEventListener('dblclick', (ev) => {
+    const pos = getMousePos(ev);
+    const hit = flowHitTest(pos.x, pos.y);
+    if (hit && hit.file) openFileViewer(hit.file, hit.line || hit.code_start || 1);
+  });
+}
+
+function requestFlowFrame() {
+  if (flowAnimFrame) return;
+  flowAnimFrame = requestAnimationFrame(() => {
+    flowAnimFrame = null;
+    drawWorkflowCanvas();
+  });
+}
+
+function resizeFlowCanvas() {
+  if (!flowCanvas) return;
+  const container = document.getElementById('flows-container');
+  const rect = container ? container.getBoundingClientRect() : { width: window.innerWidth, height: window.innerHeight - 56 };
+  flowWidth = rect.width || window.innerWidth;
+  flowHeight = rect.height || (window.innerHeight - 56);
+  flowDpr = window.devicePixelRatio || 1;
+  flowCanvas.width = Math.round(flowWidth * flowDpr);
+  flowCanvas.height = Math.round(flowHeight * flowDpr);
+}
+
+function fitWorkflowView(animate) {
+  resizeFlowCanvas();
+  if (!flowNodes.length) return;
+
+  const pad = 60;
+  const sidebarOffset = 340;
+  const availWidth = Math.max(flowWidth - sidebarOffset, 240);
+  const bw = (flowBounds.maxX - flowBounds.minX) + pad * 2;
+  const bh = (flowBounds.maxY - flowBounds.minY) + pad * 2;
+
+  // Fit the width and let the reader scroll down the rows. Shrinking until
+  // everything fits at once makes the words too small to read, which defeats
+  // the point of the view.
+  const byWidth = availWidth / Math.max(bw, 1);
+  const byHeight = (flowHeight - 150) / Math.max(bh, 1);
+  const fitScale = Math.max(0.5, Math.min(1.1, Math.max(byWidth, Math.min(byWidth, byHeight))));
+
+  flowTargetScale = fitScale;
+  flowTargetPanX = sidebarOffset + pad - flowBounds.minX * fitScale;
+  flowTargetPanY = 130 - flowBounds.minY * fitScale;
+
+  if (!animate) {
+    flowScale = flowTargetScale;
+    flowPanX = flowTargetPanX;
+    flowPanY = flowTargetPanY;
+  }
+  requestFlowFrame();
+}
+
+// -------------------------------------------------------------
+// Layout: the journey runs as one straight line of steps, and what happens
+// inside a step - its decisions, each outcome, its failure paths - hangs
+// underneath it. Read the line to follow the story; look down from a step to
+// see how it decides.
+// -------------------------------------------------------------
+const NODE_GAP = 96;              // space between two steps on the line
+const BRANCH_TOP = 118;           // drop from the line to the first shape below
+const BRANCH_STEP = 92;           // drop between shapes down a branch
+const BRANCH_GAP = 30;            // space between two shapes side by side
+const BRANCH_PER_LEVEL = 2;       // branch shapes across before stacking down
+const SPINE_PER_ROW = 5;          // steps on the line before it wraps
+const ROW_DROP = 150;             // space under a row's deepest branch
+const STEP_LABEL_H = 18;          // breathing room above a row
+const TASK_W = 268;               // wider than a symbol card: the titles are sentences
+const TASK_H = NODE_H;            // the Architecture Map card anatomy, unchanged
+const GATE_SIZE = 78;
+const EVENT_SIZE = 54;
+
+// 'simple' shows the journey and the decisions along it; 'full' adds every
+// internal step the code takes. Simple is the default because the point of this
+// view is to be readable without knowing the code.
+let flowDetail = 'simple';
+let flowRows = [];                // { index, lineY, top, bottom } per wrapped row
+let flowRowWidth = 0;
+
+function shapeSize(el) {
+  if (el.kind === 'step') return { w: TASK_W + 44, h: TASK_H };
+  if (el.kind === 'gateway') return { w: GATE_SIZE, h: GATE_SIZE };
+  if (el.kind === 'start' || el.kind === 'end' || el.kind === 'handoff' || el.kind === 'error') {
+    return { w: EVENT_SIZE, h: EVENT_SIZE };
+  }
+  return { w: TASK_W, h: TASK_H };
+}
+
+// The line is the journey: one shape per numbered step, in order. Everything
+// inside a step is grouped beneath it, placed by how far it sits from where the
+// step is entered.
+function groupByStep(els, flows) {
+  const byId = new Map(els.map(e => [e.id, e]));
+  const steps = new Map();
+  els.forEach(e => {
+    const key = e.step === undefined || e.step === null ? 0 : e.step;
+    if (!steps.has(key)) steps.set(key, []);
+    steps.get(key).push(e);
+  });
+
+  const within = new Map(els.map(e => [e.id, []]));
+  const incomingSameStep = new Map(els.map(e => [e.id, 0]));
+  flows.forEach(f => {
+    const a = byId.get(f.source);
+    const b = byId.get(f.target);
+    if (!a || !b || f.kind === 'loop_back' || a.step !== b.step) return;
+    within.get(f.source).push(f.target);
+    incomingSameStep.set(f.target, incomingSameStep.get(f.target) + 1);
+  });
+
+  const ordered = Array.from(steps.keys()).sort((a, b) => a - b);
+  return ordered.map(key => {
+    const members = steps.get(key);
+    // The head is where this step is entered: nothing inside it points here.
+    const head = members.find(e => incomingSameStep.get(e.id) === 0) || members[0];
+
+    // Everything else is placed by how far it sits from the head.
+    const depth = new Map([[head.id, 0]]);
+    const queue = [head.id];
+    while (queue.length) {
+      const id = queue.shift();
+      (within.get(id) || []).forEach(t => {
+        if (depth.has(t)) return;
+        depth.set(t, depth.get(id) + 1);
+        queue.push(t);
+      });
+    }
+    members.forEach(e => { if (!depth.has(e.id)) depth.set(e.id, 1); });
+
+    const levels = new Map();
+    members.forEach(e => {
+      if (e.id === head.id) return;
+      const d = Math.max(depth.get(e.id), 1);
+      if (!levels.has(d)) levels.set(d, []);
+      levels.get(d).push(e);
+    });
+
+    return { step: key, head: head, levels: levels, members: members };
+  });
+}
+
+function buildWorkflowLayout(w) {
+  flowNodes = [];
+  flowEdges = [];
+  flowRows = [];
+  if (!w || !w.process) { flowBounds = { minX: 0, maxX: 400, minY: 0, maxY: 300 }; return; }
+
+  const proc = w.process;
+  const decisionOutcomes = new Set();
+  proc.flows.forEach(f => { if (f.label && f.kind !== 'loop_back') decisionOutcomes.add(f.target); });
+  const headOfStep = new Map();
+  proc.elements.forEach(e => {
+    const step = e.step === undefined || e.step === null ? 0 : e.step;
+    if (!headOfStep.has(step)) headOfStep.set(step, e.id);
+  });
+  const headIds = new Set(headOfStep.values());
+
+  const keep = (e) => {
+    if (flowDetail === 'full') return true;
+    if (e.minor) return false;
+    if (headIds.has(e.id)) return true;                 // the step itself
+    if (e.kind === 'gateway' || e.kind === 'loop' || e.kind === 'error') return true;
+    if (e.kind === 'start' || e.kind === 'end') return true;
+    return decisionOutcomes.has(e.id);                  // what a decision leads to
+  };
+  const visible = proc.elements.filter(keep);
+  const visibleIds = new Set(visible.map(e => e.id));
+
+  // Hiding the bookkeeping steps must not break the chain, so a flow through a
+  // hidden shape is stitched back together end to end.
+  const outFrom = new Map();
+  proc.flows.forEach(f => {
+    if (!outFrom.has(f.source)) outFrom.set(f.source, []);
+    outFrom.get(f.source).push(f);
+  });
+  const resolveTargets = (flow, guard) => {
+    if (visibleIds.has(flow.target)) return [flow];
+    if (guard.has(flow.target)) return [];
+    guard.add(flow.target);
+    return (outFrom.get(flow.target) || []).flatMap(nextFlow => resolveTargets(
+      { source: flow.source, target: nextFlow.target, label: flow.label || nextFlow.label, kind: flow.kind },
+      guard
+    ));
+  };
+  const flows = [];
+  const seen = new Set();
+  proc.flows.forEach(f => {
+    if (!visibleIds.has(f.source)) return;
+    resolveTargets(f, new Set()).forEach(rf => {
+      const key = rf.source + '>' + rf.target + '>' + (rf.label || '');
+      if (seen.has(key) || rf.source === rf.target) return;
+      seen.add(key);
+      flows.push(rf);
+    });
+  });
+
+  const groups = groupByStep(visible, flows);
+  const spineIds = [];
+  const stepEntry = [];
+
+  // How much room each step needs: its widest level of branch shapes.
+  const slotWidth = groups.map(group => {
+    let widestLevel = shapeSize(group.head).w;
+    group.levels.forEach(list => {
+      const across = Math.min(list.length, BRANCH_PER_LEVEL);
+      widestLevel = Math.max(widestLevel, across * TASK_W + (across - 1) * BRANCH_GAP);
+    });
+    return widestLevel;
+  });
+
+  let rowIndex = 0;
+  let rowTop = STEP_LABEL_H;
+  let cursorX = 0;
+  let widest = 0;
+  let deepest = 0;
+  let rowStart = 0;
+
+  const closeRow = (endIndex) => {
+    const lineY = rowTop + Math.max(TASK_H, GATE_SIZE) / 2;
+    flowRows.push({
+      index: rowIndex,
+      lineY: lineY,
+      top: rowTop - STEP_LABEL_H,
+      bottom: lineY + deepest + ROW_DROP / 2,
+      from: rowStart,
+      to: endIndex,
+    });
+    widest = Math.max(widest, cursorX - NODE_GAP);
+    rowTop = lineY + deepest + ROW_DROP;
+    cursorX = 0;
+    deepest = 0;
+    rowIndex += 1;
+    rowStart = endIndex;
+  };
+
+  groups.forEach((group, index) => {
+    if (index > 0 && index % SPINE_PER_ROW === 0) closeRow(index);
+
+    const slot = slotWidth[index];
+    const centreX = cursorX + slot / 2;
+    const lineY = rowTop + Math.max(TASK_H, GATE_SIZE) / 2;
+
+    // The line always carries the step itself, never whichever shape the code
+    // happened to start with - a diamond on the line reads as a decision, and
+    // the decisions belong underneath.
+    const head = group.head;
+    const bare = head.kind === 'start' || (head.kind === 'end' && group.members.length === 1);
+    const lineNode = bare ? head : {
+      ...head,
+      id: 'step__' + group.step,
+      kind: 'step',
+      label: head.step_title || head.label,
+      detail: head.step_title ? head.label : head.detail,
+      isStepCard: true,
+    };
+    const lineSize = shapeSize(lineNode);
+
+    flowNodes.push({
+      ...lineNode,
+      x: centreX,
+      y: lineY,
+      w: lineSize.w,
+      h: lineSize.h,
+      onSpine: true,
+      row: rowIndex,
+    });
+    spineIds.push(lineNode.id);
+
+    // Wide fan-outs are split down the page instead of across it, so one busy
+    // step never stretches the whole diagram sideways.
+    const rows = [];
+    const levelKeys = Array.from(group.levels.keys()).sort((a, b) => a - b);
+    if (!bare) {
+      rows.push([head]);                       // the head is now a branch shape
+    }
+    levelKeys.forEach(level => {
+      const list = group.levels.get(level);
+      for (let i = 0; i < list.length; i += BRANCH_PER_LEVEL) {
+        rows.push(list.slice(i, i + BRANCH_PER_LEVEL));
+      }
+    });
+
+    rows.forEach((list, levelIndex) => {
+      list.forEach((child, position) => {
+        const size = shapeSize(child);
+        const offset = (position - (list.length - 1) / 2) * (TASK_W + BRANCH_GAP);
+        const y = lineY + BRANCH_TOP + levelIndex * BRANCH_STEP;
+        flowNodes.push({
+          ...child,
+          x: centreX + offset,
+          y: y,
+          w: size.w,
+          h: size.h,
+          onSpine: false,
+          row: rowIndex,
+        });
+        deepest = Math.max(deepest, BRANCH_TOP + levelIndex * BRANCH_STEP + size.h / 2);
+      });
+    });
+
+    if (!bare) {
+      stepEntry.push({ spine: lineNode.id, head: head.id });
+    }
+
+    cursorX += slot + NODE_GAP;
+  });
+
+  closeRow(groups.length);
+
+  // The line joins step to step; each step drops into its own internals; the
+  // shapes inside a step keep the flows the extractor found between them.
+  const placedById = new Map(flowNodes.map(n => [n.id, n]));
+  const stepOf = new Map(visible.map(e => [e.id, e.step === undefined || e.step === null ? 0 : e.step]));
+  const rebuilt = [];
+
+  for (let i = 0; i < spineIds.length - 1; i++) {
+    rebuilt.push({ source: spineIds[i], target: spineIds[i + 1], label: '', kind: 'sequence' });
+  }
+  stepEntry.forEach(pair => {
+    rebuilt.push({ source: pair.spine, target: pair.head, label: '', kind: 'enter' });
+  });
+  flows.forEach(f => {
+    const a = placedById.get(f.source);
+    const b = placedById.get(f.target);
+    if (!a || !b) return;
+    if (f.kind === 'loop_back') { rebuilt.push(f); return; }
+    if (stepOf.get(f.source) !== stepOf.get(f.target)) return;   // the line covers this
+    rebuilt.push(f);
+  });
+
+  flowEdges = rebuilt.map(f => {
+    const a = placedById.get(f.source);
+    const b = placedById.get(f.target);
+    if (a && b && a.row !== b.row && f.kind !== 'loop_back') return { ...f, kind: 'wrap' };
+    return f;
+  });
+
+  flowRowWidth = widest;
+  flowBounds = {
+    minX: -60,
+    maxX: Math.max(widest, 400),
+    minY: 0,
+    maxY: Math.max(rowTop - ROW_DROP / 2, 240),
+  };
+}
+
+// The same hover card the Architecture Map shows, carrying what a shape means
+// in business terms and the line of code it was read from.
+let flowTooltipEl = null;
+
+function showFlowTooltip(node, mouseX, mouseY) {
+  if (!flowTooltipEl) flowTooltipEl = document.getElementById('flow-tooltip');
+  if (!flowTooltipEl) return;
+
+  const source = (node.node_id && typeof nodesById !== 'undefined') ? nodesById[node.node_id] : null;
+  const layer = layerById[(source || {}).layer_id] || FALLBACK_COLOR;
+  const where = node.file ? node.file + (node.line ? ':' + node.line : '') : '';
+  const code = node.detail && node.detail !== node.label ? node.detail : '';
+
+  flowTooltipEl.innerHTML =
+    '<div class="tooltip-header"><span style="color:' + layer.color + '">*</span>' +
+    '<span>' + escapeHtml(node.label) + '</span></div>' +
+    (where ? '<div class="tooltip-file">' + escapeHtml(where) + '</div>' : '') +
+    (code ? '<div style="font-size:11px; color:#cbd5e1; font-family:monospace;">' +
+      escapeHtml(code) + '</div>' : '') +
+    (node.external ? '<div style="font-size:11px; color:#c084fc;">Leaves the tool: ' +
+      escapeHtml(node.external) + '</div>' : '');
+
+  flowTooltipEl.style.display = 'block';
+  const tw = flowTooltipEl.offsetWidth;
+  const th = flowTooltipEl.offsetHeight;
+  const left = mouseX + 16 + tw > flowWidth ? Math.max(4, mouseX - 16 - tw) : mouseX + 16;
+  const top = mouseY + 16 + th > flowHeight ? Math.max(4, mouseY - 16 - th) : mouseY + 16;
+  flowTooltipEl.style.left = left + 'px';
+  flowTooltipEl.style.top = top + 'px';
+}
+
+function hideFlowTooltip() {
+  if (!flowTooltipEl) flowTooltipEl = document.getElementById('flow-tooltip');
+  if (flowTooltipEl) flowTooltipEl.style.display = 'none';
+}
+
+function recomputeFlowBounds() {
+  if (!flowNodes.length) return;
+  let minX = -60, maxX = -Infinity, minY = 0, maxY = -Infinity;
+  flowNodes.forEach(n => {
+    minX = Math.min(minX, n.x - n.w / 2);
+    maxX = Math.max(maxX, n.x + n.w / 2);
+    maxY = Math.max(maxY, n.y + n.h / 2);
+  });
+  flowBounds = { minX, maxX, minY, maxY: Math.max(maxY + 60, 240) };
+}
+
+
+// -------------------------------------------------------------
+// Drawing
+// -------------------------------------------------------------
+const KIND_COLORS = {
+  // A step on the line is what the reader follows, so it carries the strongest
+  // edge; the shapes hanging below it are quieter detail.
+  step: { fill: '#18203a', border: '#38bdf8' },
+  task: { fill: '#141829', border: 'rgba(148,163,184,0.45)' },
+  gateway: { fill: '#1c1a2e', border: '#fbbf24' },
+  loop: { fill: '#141829', border: '#38bdf8' },
+  start: { fill: '#0f2417', border: '#34d399' },
+  end: { fill: '#241318', border: '#f87171' },
+  handoff: { fill: '#161d2e', border: '#94a3b8' },
+  error: { fill: '#2a1a12', border: '#fb923c' },
+};
+
+// Who does the work, shown on the card itself now that there are no lanes.
+const ACTOR_MARKS = {
+  user: { dot: '#38bdf8', text: 'You' },
+  system: { dot: '#64748b', text: '' },
+  external: { dot: '#c084fc', text: '' },
+};
+
+// Activities are drawn by the Architecture Map's own card renderer, so a step
+// here looks exactly like a symbol there - same anatomy, same states, same
+// palette. Only the title differs: the business phrase instead of the symbol.
+function cardItemFor(n) {
+  const source = (n.node_id && typeof nodesById !== 'undefined') ? nodesById[n.node_id] : null;
+  return {
+    id: n.id,
+    label: n.label,
+    display_label: n.label,
+    file: source ? source.file : (n.file || ''),
+    layer_id: source ? source.layer_id : laneLayerId(n.lane),
+    type: source ? source.type : 'function',
+    input_fields: source ? source.input_fields : [],
+    output_fields: source ? source.output_fields : [],
+  };
+}
+
+// A shape with no symbol behind it still needs a colour: borrow the palette
+// entry that matches who is doing the work.
+function laneLayerId(lane) {
+  if (typeof DATA === 'undefined' || !DATA.layers || !DATA.layers.length) return null;
+  const index = lane === 'user' ? 0 : (lane === 'external' ? DATA.layers.length - 1 : 1);
+  return (DATA.layers[Math.min(index, DATA.layers.length - 1)] || {}).id;
+}
+
+function drawRoundedTask(c, n, active, hovered) {
+  paintSymbolCard(c, cardItemFor(n), {
+    x: n.x,
+    y: n.y,
+    w: n.w,
+    h: n.h,
+    opacity: n.minor ? 0.72 : 1,
+    active: active,
+    hovered: hovered,
+    emphasis: n.kind === 'step',
+    dead: false,
+    badge: n.kind === 'step' && n.step ? ('#' + n.step)
+      : (n.kind === 'loop' ? '\u21bb' : (n.external ? n.external : null)),
+  });
+}
+
+// Decisions and events keep their BPMN outline but wear the card's colours and
+// its three states, so nothing on the canvas looks like it came from elsewhere.
+function shapeSkin(c, active, hovered, accent) {
+  if (active) {
+    c.fillStyle = '#1e293b';
+    c.strokeStyle = '#38bdf8';
+    c.lineWidth = 2.3;
+    c.shadowColor = '#38bdf8';
+    c.shadowBlur = 12;
+  } else if (hovered) {
+    c.fillStyle = '#222842';
+    c.strokeStyle = accent;
+    c.lineWidth = 1.8;
+    c.shadowColor = accent;
+    c.shadowBlur = 6;
+  } else {
+    c.fillStyle = '#141829';
+    c.strokeStyle = accent;
+    c.lineWidth = 1.2;
+    c.shadowBlur = 0;
+  }
+}
+
+function drawGateway(c, n, active, hovered) {
+  const r = n.w / 2;
+  c.save();
+  c.beginPath();
+  c.moveTo(n.x, n.y - r);
+  c.lineTo(n.x + r, n.y);
+  c.lineTo(n.x, n.y + r);
+  c.lineTo(n.x - r, n.y);
+  c.closePath();
+  shapeSkin(c, active, hovered, KIND_COLORS.gateway.border);
+  c.fill();
+  c.stroke();
+  c.shadowBlur = 0;
+
+  // The exclusive-gateway X.
+  c.strokeStyle = active ? '#38bdf8' : '#fbbf24';
+  c.lineWidth = 2;
+  const k = r * 0.32;
+  c.beginPath();
+  c.moveTo(n.x - k, n.y - k); c.lineTo(n.x + k, n.y + k);
+  c.moveTo(n.x + k, n.y - k); c.lineTo(n.x - k, n.y + k);
+  c.stroke();
+
+  // The question rides above the diamond, where BPMN puts it.
+  c.textAlign = 'center';
+  c.textBaseline = 'bottom';
+  c.fillStyle = '#fde68a';
+  c.font = 'bold 11.5px -apple-system, sans-serif';
+  const lines = wrapText(n.label, 210, c.font).slice(0, 2);
+  lines.forEach((line, i) => c.fillText(line, n.x, n.y - r - 8 - (lines.length - 1 - i) * 14));
+  c.restore();
+}
+
+function drawEvent(c, n, active, hovered) {
+  const colors = KIND_COLORS[n.kind] || KIND_COLORS.handoff;
+  const r = n.w / 2;
+  c.save();
+  c.beginPath();
+  c.arc(n.x, n.y, r, 0, Math.PI * 2);
+  shapeSkin(c, active, hovered, colors.border);
+  c.fill();
+  // BPMN weight: a thin ring starts, a thick ring ends, a double ring hands on.
+  if (!active && n.kind === 'end') c.lineWidth = 3.2;
+  c.stroke();
+  if (n.kind === 'handoff') {
+    c.beginPath();
+    c.arc(n.x, n.y, r - 5, 0, Math.PI * 2);
+    c.lineWidth = 1.4;
+    c.stroke();
+  }
+  c.shadowBlur = 0;
+
+  if (n.kind === 'error') {
+    c.fillStyle = colors.border;
+    c.font = '15px -apple-system, sans-serif';
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText('⚡', n.x, n.y);
+  }
+
+  c.textAlign = 'center';
+  c.textBaseline = 'top';
+  c.fillStyle = '#cbd5f5';
+  c.font = '11px -apple-system, sans-serif';
+  const lines = wrapText(n.label, 170, c.font).slice(0, 2);
+  lines.forEach((line, i) => c.fillText(line, n.x, n.y + r + 7 + i * 13));
+  c.restore();
+}
+
+// BPMN connectors turn at right angles rather than curving.
+function drawConnector(c, src, tgt, flow, highlight) {
+  // Sides are chosen by where the two shapes actually sit: along the line a
+  // flow leaves to the right, down a branch it leaves from underneath.
+  const dx = tgt.x - src.x;
+  const dy = tgt.y - src.y;
+  const vertical = Math.abs(dy) > Math.abs(dx);
+  const down = dy >= 0;
+  const right = dx >= 0;
+
+  const startX = vertical ? src.x : src.x + (right ? src.w / 2 : -src.w / 2);
+  const startY = vertical ? src.y + (down ? src.h / 2 : -src.h / 2) : src.y;
+  const endX = vertical ? tgt.x : tgt.x - (right ? tgt.w / 2 : -tgt.w / 2);
+  const endY = vertical ? tgt.y - (down ? tgt.h / 2 : -tgt.h / 2) : tgt.y;
+  const loop = flow.kind === 'loop_back';
+
+  c.save();
+  c.strokeStyle = highlight ? '#38bdf8'
+    : loop ? 'rgba(56,189,248,0.4)'
+    : flow.kind === 'error' ? 'rgba(251,146,60,0.6)'
+    : 'rgba(148,163,184,0.5)';
+  c.lineWidth = highlight ? 2.4 : 1.4;
+  if (flow.kind === 'error') c.setLineDash([5, 4]);
+
+  c.beginPath();
+  let arrowFromX = endX;
+  let arrowFromY = endY;
+  if (loop) {
+    // Route a repeat underneath both shapes so it never hides the main path.
+    const dip = Math.max(src.y + src.h / 2, tgt.y + tgt.h / 2) + 26;
+    c.moveTo(src.x, src.y + src.h / 2);
+    c.lineTo(src.x, dip);
+    c.lineTo(tgt.x, dip);
+    c.lineTo(tgt.x, tgt.y + tgt.h / 2);
+    arrowFromX = tgt.x;
+    arrowFromY = dip;
+  } else if (flow.kind === 'wrap') {
+    // The process continues on the next page row: leave to the right, drop
+    // through the gap between rows, and come back in from the left.
+    const outX = flowRowWidth + 34;
+    const inX = tgt.x - tgt.w / 2 - 34;
+    const srcRow = flowRows.find(r => r.index === src.row) || { bottom: src.y + src.h };
+    const tgtRow = flowRows.find(r => r.index === tgt.row) || { top: tgt.y - tgt.h };
+    const midY = ((srcRow.bottom || src.y) + (tgtRow.top || tgt.y)) / 2;
+    c.moveTo(startX, startY);
+    c.lineTo(outX, startY);
+    c.lineTo(outX, midY);
+    c.lineTo(inX, midY);
+    c.lineTo(inX, endY);
+    c.lineTo(endX, endY);
+    arrowFromX = inX;
+    arrowFromY = endY;
+  } else if (Math.abs(startY - endY) < 1 || Math.abs(startX - endX) < 1) {
+    c.moveTo(startX, startY);
+    c.lineTo(endX, endY);
+    arrowFromX = startX;
+    arrowFromY = startY;
+  } else if (vertical) {
+    const midY = startY + (endY - startY) / 2;
+    c.moveTo(startX, startY);
+    c.lineTo(startX, midY);
+    c.lineTo(endX, midY);
+    c.lineTo(endX, endY);
+    arrowFromX = endX;
+    arrowFromY = midY;
+  } else {
+    const midX = startX + (endX - startX) / 2;
+    c.moveTo(startX, startY);
+    c.lineTo(midX, startY);
+    c.lineTo(midX, endY);
+    c.lineTo(endX, endY);
+    arrowFromX = midX;
+    arrowFromY = endY;
+  }
+  c.stroke();
+  c.setLineDash([]);
+
+  // Arrow head, pointing the way the last segment travels.
+  const angle = loop ? -Math.PI / 2 : Math.atan2(endY - arrowFromY, endX - arrowFromX);
+  const tipX = loop ? tgt.x : endX;
+  const tipY = loop ? tgt.y + tgt.h / 2 : endY;
+  c.beginPath();
+  c.moveTo(tipX, tipY);
+  c.lineTo(tipX - 9 * Math.cos(angle - Math.PI / 7), tipY - 9 * Math.sin(angle - Math.PI / 7));
+  c.lineTo(tipX - 9 * Math.cos(angle + Math.PI / 7), tipY - 9 * Math.sin(angle + Math.PI / 7));
+  c.closePath();
+  c.fillStyle = c.strokeStyle;
+  c.fill();
+
+  if (flow.label && !loop) {
+    c.font = '10px -apple-system, sans-serif';
+    const text = flow.label;
+    const tw = c.measureText(text).width;
+    const lx = vertical ? startX + 10 : startX + 12;
+    const ly = vertical ? startY + (down ? 22 : -14) : startY - 8;
+    c.fillStyle = 'rgba(10, 14, 26, 0.9)';
+    c.fillRect(lx - 3, ly - 10, tw + 6, 14);
+    c.fillStyle = flow.label === 'Yes' ? '#34d399' : (flow.label === 'No' ? '#f87171' : '#94a3b8');
+    c.textAlign = 'left';
+    c.textBaseline = 'middle';
+    c.fillText(text, lx, ly - 3);
+  }
+  c.restore();
+}
+
+function drawWorkflowCanvas() {
+  if (!flowCanvas || !flowCtx) return;
+
+  flowPanX += (flowTargetPanX - flowPanX) * 0.2;
+  flowPanY += (flowTargetPanY - flowPanY) * 0.2;
+  flowScale += (flowTargetScale - flowScale) * 0.2;
+  if (Math.abs(flowTargetScale - flowScale) < 0.001) flowScale = flowTargetScale;
+
+  const hudZoom = document.getElementById('hud-flow-zoom-text');
+  if (hudZoom) hudZoom.textContent = `${Math.round(flowScale * 100)}%`;
+
+  flowCtx.setTransform(flowDpr, 0, 0, flowDpr, 0, 0);
+  flowCtx.clearRect(0, 0, flowWidth, flowHeight);
+
+  flowCtx.save();
+  flowCtx.translate(flowPanX, flowPanY);
+  flowCtx.scale(flowScale, flowScale);
+
+  // 1. The main line each row runs along, drawn behind everything else.
+  flowRows.forEach(row => {
+    const onRow = flowNodes.filter(n => n.onSpine && n.row === row.index);
+    if (onRow.length < 2) return;
+    const from = Math.min(...onRow.map(n => n.x));
+    const to = Math.max(...onRow.map(n => n.x));
+    flowCtx.save();
+    flowCtx.strokeStyle = 'rgba(56, 189, 248, 0.20)';
+    flowCtx.lineWidth = 16;
+    flowCtx.lineCap = 'round';
+    flowCtx.beginPath();
+    flowCtx.moveTo(from, row.lineY);
+    flowCtx.lineTo(to, row.lineY);
+    flowCtx.stroke();
+    flowCtx.restore();
+  });
+
+  const byId = new Map(flowNodes.map(n => [n.id, n]));
+
+  // 2. Connectors under the shapes.
+  flowEdges.forEach(f => {
+    const src = byId.get(f.source);
+    const tgt = byId.get(f.target);
+    if (!src || !tgt) return;
+    const highlight = flowHoverNodeId === f.source || flowHoverNodeId === f.target ||
+                      flowSelectedNodeId === f.source || flowSelectedNodeId === f.target;
+    drawConnector(flowCtx, src, tgt, f, highlight);
+  });
+
+  // 3. Shapes.
+  flowNodes.forEach(n => {
+    const active = n.id === flowSelectedNodeId;
+    const hovered = n.id === flowHoverNodeId;
+    if (n.kind === 'gateway') drawGateway(flowCtx, n, active, hovered);
+    else if (n.kind === 'task' || n.kind === 'loop' || n.kind === 'step') drawRoundedTask(flowCtx, n, active, hovered);
+    else drawEvent(flowCtx, n, active, hovered);
+  });
+
+  flowCtx.restore();
+
+  if (Math.abs(flowTargetPanX - flowPanX) > 0.1 || Math.abs(flowTargetPanY - flowPanY) > 0.1 ||
+      Math.abs(flowTargetScale - flowScale) > 0.001) {
+    requestFlowFrame();
+  }
+}
+
+
+function selectWorkflow(flowId) {
+  activeWorkflowId = flowId;
+  hideFlowTooltip();
+  const workflows = DATA.workflows || [];
+  const w = workflows.find(item => item.id === flowId);
+
+  // Update active state in sidebar
+  document.querySelectorAll('#flows-list .flow-card').forEach(c => {
+    c.classList.toggle('active', c.getAttribute('data-flow-id') === flowId);
+  });
+
+  const emptyState = document.getElementById('flows-empty-state');
+  const headerCard = document.getElementById('flow-header-card');
+  if (!w) {
+    if (emptyState) emptyState.style.display = 'flex';
+    if (headerCard) headerCard.style.display = 'none';
+    return;
+  }
+
+  if (emptyState) emptyState.style.display = 'none';
+  if (headerCard) headerCard.style.display = 'flex';
+
+  // Header
+  const titleEl = document.getElementById('flow-header-title');
+  const badgeEl = document.getElementById('flow-header-layer-badge');
+  const summaryEl = document.getElementById('flow-header-summary');
+  const stepsMetaEl = document.getElementById('flow-meta-steps');
+  const entryMetaEl = document.getElementById('flow-meta-entry');
+  const layersMetaEl = document.getElementById('flow-meta-layers');
+
+  if (titleEl) titleEl.textContent = w.title;
+  if (badgeEl) {
+    badgeEl.textContent = w.category || w.layer || 'Architecture';
+    badgeEl.style.background = getLayerColor(w.layer_id);
+  }
+  if (summaryEl) summaryEl.textContent = w.summary;
+  if (stepsMetaEl) stepsMetaEl.textContent = `${w.step_count} Logical Steps`;
+  if (entryMetaEl) entryMetaEl.textContent = `Entry: ${w.root_node} (${w.file})`;
+
+  if (layersMetaEl) {
+    layersMetaEl.innerHTML = (w.layers_involved || []).map(lname => {
+      return `<span class="flow-meta-pill" style="border-color: rgba(255,255,255,0.15);">${escapeHtml(lname)}</span>`;
+    }).join('');
+  }
+
+  // Build Layout and Render on Workflow Canvas
+  buildWorkflowLayout(w);
+  fitWorkflowView(false);
+}
+
+
 
 // -------------------------------------------------------------
 // Boot
@@ -2580,3 +3705,5 @@ updateHud();
 fitToVisible(false);
 requestAnimationFrame(renderLoop);
 initSourceAccess();
+initWorkflowsExplorer();
+
