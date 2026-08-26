@@ -103,7 +103,8 @@ def resolve_node_id(
     if graph.has_node(query):
         return query, 1.0, dict(graph.nodes[query])
 
-    matches = vector_store.search(query, top_k=CANDIDATE_POOL)
+    raw_matches = vector_store.search(query, top_k=CANDIDATE_POOL)
+    matches = [(doc, s) for doc, s in raw_matches if s >= vector_store.score_floor]
     score_by_id = {doc["id"]: score for doc, score in matches}
     norm_query = normalize_label(query)
 
@@ -115,6 +116,7 @@ def resolve_node_id(
 
     if not matches:
         return None
+
 
     top_doc, top_score = matches[0]
     floor = top_score * (1.0 - MATCH_MARGIN)

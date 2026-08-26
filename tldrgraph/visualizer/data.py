@@ -16,9 +16,13 @@ import os
 import re
 from typing import Any, Dict, List, Set, Tuple
 
+import networkx as nx
+
 from ..hierarchy import is_test_node
 from ..layer_config import load_layer_config
 from ..layers import get_registry
+from .flows_data import extract_visualizer_workflows
+from .bpmn_data import attach_bpmn_processes
 from .palette import FALLBACK_COLOR, palette_at
 from .source import SourceIndex, language_for, symbol_name
 
@@ -159,30 +163,16 @@ def _build_single_node_record(
     ) or {}
 
     node_rec = {
-        "id": nid,
-        "label": label,
-        "display_label": display_label,
-        "file": fpath,
-        "layer_id": lid,
-        "layer": layer_info["name"],
-        "type": n.get("type", "function"),
-        "tier": 2,
-        "is_test": test_flag,
-        "intent": (n.get("intent") or "").strip(),
-        "input_fields": n.get("input_fields") or [],
-        "output_fields": n.get("output_fields") or [],
-        "fields": n.get("fields") or [],
-        "source_location": n.get("source_location") or "",
-        "dead_code_status": n.get("dead_code_status") or "live",
-        "path": fpath,
-        "name": symbol_name(label, display_label),
-        "language": language_for(fpath),
-        "code_start": located.get("start", 0),
-        "code_end": located.get("end", 0),
-        "code_relocated": bool(located.get("relocated", False)),
-        "module_id": mod_id,
-        "inbound": [],
-        "outbound": [],
+        "id": nid, "label": label, "display_label": display_label, "file": fpath,
+        "layer_id": lid, "layer": layer_info["name"], "type": n.get("type", "function"),
+        "tier": 2, "is_test": test_flag, "intent": (n.get("intent") or "").strip(),
+        "input_fields": n.get("input_fields") or [], "output_fields": n.get("output_fields") or [],
+        "fields": n.get("fields") or [], "source_location": n.get("source_location") or "",
+        "dead_code_status": n.get("dead_code_status") or "live", "path": fpath,
+        "name": symbol_name(label, display_label), "language": language_for(fpath),
+        "code_start": located.get("start", 0), "code_end": located.get("end", 0),
+        "code_relocated": bool(located.get("relocated", False)), "module_id": mod_id,
+        "inbound": [], "outbound": [],
     }
     return node_rec, mod_id, lid, test_flag, layer_info
 
@@ -356,6 +346,15 @@ def _load_or_extract_snapshot(root_dir: str) -> Tuple[List[Dict[str, Any]], List
     return nodes, edges
 
 
+def _build_nx_graph(raw_nodes: List[Dict[str, Any]], raw_edges: List[Dict[str, Any]]) -> nx.DiGraph:
+    g = nx.DiGraph()
+    for n in raw_nodes:
+        g.add_node(str(n["id"]), **n)
+    for e in raw_edges:
+        g.add_edge(str(e["source"]), str(e["target"]), relation=e.get("relation", "calls"))
+    return g
+
+
 def prepare_visualizer_data(root_dir: str) -> Dict[str, Any]:
     """Builds the complete two-tier payload inlined into the standalone HTML app."""
     load_layer_config(root_dir)
@@ -370,6 +369,10 @@ def prepare_visualizer_data(root_dir: str) -> Dict[str, Any]:
     child_edges, module_edges = _build_edges(raw_edges, nodes_by_id, modules_by_id)
     modules = _serialize_modules(modules_by_id)
 
+    graph = _build_nx_graph(raw_nodes, raw_edges)
+    workflows = extract_visualizer_workflows(graph, nodes_by_id, sources)
+    attach_bpmn_processes(root_dir, workflows, graph, nodes_by_id)
+
     active_layer_ids = {m["layer_id"] for m in modules}
     layers = sorted((l for l in layer_map.values() if l["id"] in active_layer_ids), key=lambda x: x["order"])
 
@@ -378,11 +381,13 @@ def prepare_visualizer_data(root_dir: str) -> Dict[str, Any]:
         "layers": layers,
         "modules": modules,
         "nodes": list(nodes_by_id.values()),
+        "workflows": workflows,
         "module_edges": module_edges,
         "child_edges": child_edges,
         "stats": {
             "total_modules": len(modules),
             "total_nodes": len(nodes_by_id),
+            "total_workflows": len(workflows),
             "total_module_edges": len(module_edges),
             "total_child_edges": len(child_edges),
             "test_modules": sum(1 for m in modules if m["is_test"]),

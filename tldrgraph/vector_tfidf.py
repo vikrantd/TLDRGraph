@@ -25,8 +25,10 @@ def doc_text(doc: Dict[str, Any]) -> str:
     input_fields = doc.get("input_fields") or []
     output_fields = doc.get("output_fields") or []
     legacy_fields = doc.get("fields") or []
+    calls = doc.get("calls") or []
     all_fields = list(input_fields) + list(output_fields) + (list(legacy_fields) if not input_fields and not output_fields else [])
     fields_str = " ".join(str(f) for f in all_fields)
+    calls_str = " ".join(str(c) for c in calls)
     return " ".join(str(part) for part in (
         doc.get("label", ""),
         doc.get("layer", ""),
@@ -35,6 +37,7 @@ def doc_text(doc: Dict[str, Any]) -> str:
         doc.get("summary", ""),
         doc.get("intent", ""),
         fields_str,
+        calls_str,
     ) if part)
 
 
@@ -56,16 +59,20 @@ def embed_text(doc: Dict[str, Any]) -> str:
     input_fields = doc.get("input_fields") or []
     output_fields = doc.get("output_fields") or []
     legacy_fields = doc.get("fields") or []
+    calls = doc.get("calls") or []
     all_fields = list(input_fields) + list(output_fields) + (list(legacy_fields) if not input_fields and not output_fields else [])
     fields = ", ".join(str(f) for f in all_fields)
+    calls_str = ", ".join(str(c) for c in calls[:6])
 
     parts = [p for p in (
         humanize_identifier(label),
         f"defined in {where}" if where else "",
         intent or summary,
         f"fields: {fields}" if fields else "",
+        f"calls: {calls_str}" if calls_str else "",
     ) if p]
     return ". ".join(parts)
+
 
 
 def compute_idf(documents: List[Dict[str, Any]]) -> Tuple[Dict[str, float], List[List[str]]]:

@@ -21,11 +21,8 @@ from .data import prepare_visualizer_data
 from .palette import FALLBACK_COLOR, PALETTE, build_layers_config
 from .render import generate_visualizer_html, render_html
 
-#: Backwards-compatible aliases for the previous single-module layout.
-_prepare_visualizer_data = prepare_visualizer_data
-_render_html = render_html
-
 __all__ = [
+
     "PALETTE",
     "FALLBACK_COLOR",
     "build_layers_config",

@@ -166,16 +166,6 @@ class GraphLoader:
             self.graph.nodes[node_id]["display_label"] = value
         return len(display)
 
-    def _apply_display_labels(self) -> int:
-        node_records = [{"id": node_id, **data} for node_id, data in self.graph.nodes(data=True)]
-        edge_records = [
-            {"source": src, "target": tgt, "relation": data.get("relation")}
-            for src, tgt, data in self.graph.edges(data=True)
-        ]
-        display = build_display_labels(node_records, edge_records)
-        for node_id, value in display.items():
-            self.graph.nodes[node_id]["display_label"] = value
-        return len(display)
 
     def _attach_cached_node_state(
         self, live_attrs: Dict[str, Any], layer_obj: Any, label: str, file_path: str

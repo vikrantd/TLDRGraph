@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Dict, List
+
 
 from .data import prepare_visualizer_data
 from .palette import build_layers_config
@@ -36,17 +38,19 @@ def _json_for_script(payload: Any) -> str:
 
 
 def render_html(data: Dict[str, Any], layers_config: List[Dict[str, Any]]) -> str:
+
     """Inlines visualizer data, styles and app code into the standalone shell."""
     template = _read_asset("index.html")
-    return (
-        template
-        .replace("/*__STYLES__*/", _read_asset("app.css"))
-        .replace("/*__DATA_JSON__*/", _json_for_script(data))
-        .replace("/*__LAYERS_JSON__*/", _json_for_script(layers_config))
-        # sourceview first: app.js boot code runs as soon as it is parsed.
-        .replace("/*__SOURCEVIEW_JS__*/", _read_asset("sourceview.js"))
-        .replace("/*__APP_JS__*/", _read_asset("app.js"))
-    )
+    replacements = {
+        "/*__STYLES__*/": _read_asset("app.css"),
+        "/*__DATA_JSON__*/": _json_for_script(data),
+        "/*__LAYERS_JSON__*/": _json_for_script(layers_config),
+        "/*__SOURCEVIEW_JS__*/": _read_asset("sourceview.js"),
+        "/*__APP_JS__*/": _read_asset("app.js"),
+    }
+    pattern = re.compile("|".join(re.escape(k) for k in replacements.keys()))
+    return pattern.sub(lambda m: replacements[m.group(0)], template)
+
 
 
 def generate_visualizer_html(root_dir: str = ".") -> str:
