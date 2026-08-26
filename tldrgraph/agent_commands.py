@@ -34,8 +34,8 @@ BLOCK_END = "<!-- END TLDRGRAPH -->"
 #: that would collide with the package's own CLI name in some shells.
 COMMAND_NAME = "tldrgraph-init"
 
-#: The cross-tool instructions standard. Read by Claude Code, Cursor, Antigravity,
-#: opencode, Codex, Gemini CLI, Zed and Copilot, so those tools need no file of their own.
+#: The cross-tool instructions standard. Read by Claude Code, Cursor, Codex,
+#: Antigravity, opencode, Gemini CLI, Zed and Copilot, so those tools need no file of their own.
 AGENTS_MD = "AGENTS.md"
 
 
@@ -55,7 +55,8 @@ TARGETS: Tuple[AgentTarget, ...] = (
     AgentTarget("Cursor", command_path=f".cursor/commands/{COMMAND_NAME}.md"),
     AgentTarget("opencode", command_path=f".opencode/command/{COMMAND_NAME}.md",
                 marker=".opencode"),
-    AgentTarget("Antigravity",
+    # Codex's repository-local skill convention. Antigravity also reads this path.
+    AgentTarget("Codex",
                 command_path=f".agents/skills/{COMMAND_NAME}/SKILL.md"),
     AgentTarget("Cline",
                 command_path=f".clinerules/workflows/{COMMAND_NAME}.md",

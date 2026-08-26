@@ -587,7 +587,7 @@ def test_dead_code_has_no_delete_capability(run):
 # Installer
 # --------------------------------------------------------------------------- #
 
-def test_install_writes_claude_cursor_and_antigravity(tmp_path):
+def test_install_writes_claude_cursor_and_codex(tmp_path):
     written = installer_module.install_agent_rules(str(tmp_path))
 
     # One body of instructions and one command, per tool. No tool gets bespoke
@@ -598,7 +598,7 @@ def test_install_writes_claude_cursor_and_antigravity(tmp_path):
         "AGENTS.md (instructions, all agents)": "AGENTS.md",
         "Claude Code (command)": ".claude/commands/tldrgraph-init.md",
         "Cursor (command)": ".cursor/commands/tldrgraph-init.md",
-        "Antigravity (command)": ".agents/skills/tldrgraph-init/SKILL.md",
+        "Codex (command)": ".agents/skills/tldrgraph-init/SKILL.md",
     }
     assert set(written) == set(expected)
     for key, rel in expected.items():
