@@ -3,7 +3,7 @@
 The **Architecture Map** is a clustered, multi-layer visual canvas built into TLDRGraph. It compiles into a zero-dependency HTML file (`.tldrgraph/TLDRGRAPH_VISUALIZER.html`) that can be opened in any modern browser.
 
 <p align="center">
-  <img src="../assets/architecture_map.png" alt="TLDRGraph Architecture Map" width="100%" />
+  <img src="../../assets/architecture_map.png" alt="TLDRGraph Architecture Map" width="100%" />
 </p>
 
 ---

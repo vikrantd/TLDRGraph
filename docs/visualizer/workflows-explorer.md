@@ -3,7 +3,7 @@
 The **Workflows Explorer** renders end-to-end execution pipelines and decision flows on a full-width background canvas.
 
 <p align="center">
-  <img src="../assets/workflows_explorer.png" alt="TLDRGraph Workflows Explorer" width="100%" />
+  <img src="../../assets/workflows_explorer.png" alt="TLDRGraph Workflows Explorer" width="100%" />
 </p>
 
 ---
