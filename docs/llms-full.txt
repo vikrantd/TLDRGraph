@@ -1,0 +1,926 @@
+---
+title: TLDRGraph - Multi-Layer Architecture & Semantic Call Tracing
+---
+
+# TLDRGraph 🌐
+
+<p align="center">
+  <img src="assets/tldrgraph_logo.svg" alt="TLDRGraph Logo" width="380" />
+</p>
+
+<p align="center">
+  <strong>See the flow of your spaghetti code, VibeCoders.</strong> 🍝➡️⚡<br>
+  <em>Dynamic Multi-Layer Code Flow, Instant Semantic Call Tracing, and Interactive Architectural Navigation.</em>
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/tldrgraph/"><img src="https://img.shields.io/badge/pypi-v0.2.0-3775A9.svg?logo=pypi&logoColor=white" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/tldrgraph/"><img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python&logoColor=white" alt="Python versions"></a>
+  <a href="https://github.com/vikrantd/TLDRGraph/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://github.com/safishamsi/graphify"><img src="https://img.shields.io/badge/AST%20Engine-Graphify-emerald.svg" alt="Powered by Graphify"></a>
+</p>
+
+---
+
+## 💡 What is TLDRGraph?
+
+Modern codebases are messy. Microservices, multi-layer abstractions, dynamic API routes, and ORM calls create cognitive overload for both human developers and AI coding agents.
+
+**TLDRGraph** cuts through the noise. It dynamically classifies your repository into tailored architectural layers, extracts cross-layer execution seams, tracks changes using zero-token SHA-256 hash gating, and provides both **CLI flow tables** and a **lightning-fast standalone visualizer**.
+
+```mermaid
+graph LR
+    A[Raw Source Code] --> B[AST Parser & Extraction]
+    B --> C[Agent-Designed Dynamic Layers]
+    C --> D[Cross-Layer Seam Bridges]
+    D --> E[Zero-Token SHA-256 Hash Gate]
+    E --> F[Hybrid TF-IDF & Dense Embeddings]
+    F --> G[Interactive Visualizer & CLI Flows]
+```
+
+---
+
+## 🗺️ Interactive Visual Navigation
+
+TLDRGraph compiles a self-contained, zero-dependency interactive visualizer (`.tldrgraph/TLDRGRAPH_VISUALIZER.html`) that maps your entire codebase into structured architectural layers and clear end-to-end execution flows:
+
+### 1. Architecture Map (Multi-Layer Clustered Navigation)
+> *Zoom out to inspect high-level module architecture across dynamic layers; zoom in to examine function signatures, callers, and callees with cross-layer connection lines.*
+
+<p align="center">
+  <img src="assets/architecture_map.png" alt="TLDRGraph Architecture Map" width="100%" />
+</p>
+
+### 2. Workflows Explorer (End-to-End Execution & Decision Flows)
+> *Follow step-by-step execution journeys with sequential flow lines, decision branches, participating symbols, and cross-layer transitions.*
+
+<p align="center">
+  <img src="assets/workflows_explorer.png" alt="TLDRGraph Workflows Explorer" width="100%" />
+</p>
+
+---
+
+## 🏆 Key Features
+
+- **🏛️ Agent-Designed Architecture**: Zero hardcoded templates. Your AI coding agent inspects real extracted symbols and classifies the codebase into natural layers tailored to your project.
+- **⚡ 100% SWE-bench Lite Recall@10**: Outperforms Chunked Dense RAG, BM25, and Aider Repo-Map on real-world bug localization tasks while consuming up to 10× fewer context tokens.
+- **🔗 Cross-Layer Seam Extraction**: Deterministically links frontend client calls (e.g. `api.get('/users')`) to backend route handlers, controller methods, and database schemas.
+- **🔒 Zero-Token SHA-256 Hash Gating**: Local SQLite cache tracks file content signatures. Only dirty or newly added nodes trigger re-indexing or enrichment.
+- **🔍 Fast ONNX Dense Embeddings**: Bundles local `BAAI/bge-small-en-v1.5` dense embeddings via FastEmbed, running on CPU without PyTorch or CUDA overhead.
+- **🌐 Standalone Browser Visualizer**: Single-file HTML bundle with high-contrast layer palette, pan/zoom canvas, upstream caller/downstream callee graph, and live source viewer.
+
+---
+
+## 🚀 Quick Preview
+
+=== "Install"
+
+    ```bash
+    pip install tldrgraph
+    ```
+
+=== "Build Graph (Agent-First)"
+
+    ```bash
+    # In Claude Code or Cursor:
+    /tldrgraph-init
+
+    # Or in Codex:
+    $tldrgraph-init
+    ```
+
+=== "Query Flows"
+
+    ```bash
+    tldrgraph query "user authentication flow"
+    ```
+
+=== "Launch Visualizer"
+
+    ```bash
+    tldrgraph ui --serve
+    ```
+# Installation Guide
+
+Install TLDRGraph directly from PyPI.
+
+## Prerequisites
+
+- **Python**: `>= 3.10` (Python 3.10, 3.11, and 3.12 are fully tested and supported).
+- **Operating System**: macOS, Linux, or Windows (WSL recommended on Windows).
+- **Git**: Installed and available in `$PATH`.
+
+---
+
+## 1. Install via pip
+
+Install the official package:
+
+```bash
+pip install tldrgraph
+```
+
+Or using `uv`:
+
+```bash
+uv pip install tldrgraph
+```
+
+---
+
+## 2. Verify Installation
+
+Check that the CLI is accessible:
+
+```bash
+tldrgraph --version
+```
+
+Output:
+```text
+tldrgraph, version 0.2.0
+```
+
+---
+
+## 3. Optional Dependencies
+
+TLDRGraph comes with FastEmbed ONNX dense embeddings pre-configured. If you plan to build or serve the documentation locally:
+
+```bash
+pip install "tldrgraph[docs]"
+```
+
+---
+
+## 4. Install Coding Agent Commands
+
+TLDRGraph installs identical workflows and execution rules across your preferred coding agents:
+
+```bash
+# Detect and install for all active agent environments in the repository
+tldrgraph install --all-agents
+```
+
+This sets up:
+- **Claude Code**: `.claude/commands/tldrgraph-init.md`
+- **Cursor**: `.cursor/commands/tldrgraph-init.md`
+- **Codex**: `.agents/skills/tldrgraph-init/SKILL.md`
+- **Antigravity / Gemini CLI / Copilot / Zed**: `AGENTS.md`
+- **Windsurf**: `.windsurf/workflows/`
+- **Cline / Roo Code / KiloCode**: `.clinerules/workflows/`
+# Quickstart: 5-Minute Tour
+
+Get up and running with TLDRGraph in your repository.
+
+---
+
+## Step 1: Initialize the Graph with Your Agent
+
+!!! tip "Agent-Driven Architecture"
+    **Do not run `tldrgraph init` manually in a terminal.** TLDRGraph is designed to be agent-driven: your coding agent inspects the repository's symbols and designs architectural layers tailored specifically to your project.
+
+Trigger the initialization command within your coding agent:
+
+=== "Claude Code / Cursor"
+
+    ```bash
+    /tldrgraph-init
+    ```
+
+=== "Codex"
+
+    Open `/skills` and select `tldrgraph-init`, or run:
+    ```bash
+    $tldrgraph-init
+    ```
+
+=== "Other Agents (Antigravity, Windsurf, Roo)"
+
+    Ask your agent:
+    ```text
+    Please run the /tldrgraph-init workflow as specified in AGENTS.md.
+    ```
+
+### What Happens Behind the Scenes:
+1. **AST Extraction**: Parses Python, TypeScript, and JavaScript source files into an AST symbol graph.
+2. **Dynamic Layer Design**: Your agent reads the extracted symbols and writes `.tldrgraph/layers.config.yaml` with customized layer boundaries.
+3. **Approval & Enrichment**: Asks once before spending LLM tokens to summarize key bottleneck symbols in 200-node chunks.
+4. **Vector Indexing**: Automatically builds local FastEmbed ONNX dense embeddings.
+
+---
+
+## Step 2: Explore the Interactive Visualizer
+
+Launch the self-contained visualizer:
+
+```bash
+tldrgraph ui --serve
+```
+
+This opens `.tldrgraph/TLDRGRAPH_VISUALIZER.html` in your default web browser:
+- **Architecture Map**: Zoom out to see multi-layer module clusters; zoom in to see classes, functions, and cross-layer connection lines.
+- **Workflows Explorer**: Click on the Workflows tab to view step-by-step decision journeys with inputs, outputs, and branch conditions.
+- **Node Inspector**: Click any node to isolate upstream callers, downstream callees, and read live file content.
+
+---
+
+## Step 3: Query Execution Flows via CLI
+
+Ask natural language queries about how features work:
+
+```bash
+tldrgraph query "pension calculation and approval flow"
+```
+
+TLDRGraph retrieves top execution flows spanning across UI, API, Service, and DB layers, formatting them as compact Markdown tables.
+
+---
+
+## Step 4: Trace Exact Call Paths
+
+Trace the shortest cross-layer dependency path between any two symbols:
+
+```bash
+tldrgraph trace "ApplicationsController" "PensionCalculator"
+```
+
+Output:
+```text
+Trace Path: ApplicationsController -> PensionService -> PensionCalculator
+  Layer 1: ApplicationsController [API Layer]
+    └── calls PensionService.calculate() (tldrgraph/service.py:42)
+  Layer 2: PensionService [Business Logic]
+    └── calls PensionCalculator.evaluate() (tldrgraph/calculator.py:18)
+```
+
+---
+
+## Step 5: Review Dead Code Candidates
+
+Inspect unreferenced symbols that may be safe to refactor or remove:
+
+```bash
+tldrgraph dead-code
+```
+
+Surfaces orphaned functions, unused database models, and unreachable handlers with forward reachability confidence scores.
+# Agent-Designed Dynamic Layers
+
+TLDRGraph rejects one-size-fits-all architectural templates. 
+
+Every codebase is unique: an event-driven Kafka microservice looks nothing like a Django monolith, which looks nothing like a Next.js full-stack app. Hardcoding a static "Controllers -> Services -> Repositories" layer template is wrong everywhere it looks plausible.
+
+---
+
+## The Philosophy: Discover, Don't Guess
+
+When TLDRGraph runs on a fresh repository, **it ships with no layer templates**. Instead:
+
+1. **Symbol Extraction**: TLDRGraph parses the code into functions, classes, decorators, routes, and imports.
+2. **Agent Hand-off**: It hands the symbol inventory to your coding agent with architectural sketches of how different kinds of codebases can separate concerns.
+3. **Agent Design**: The agent asks: *"Where does responsibility change hands in this specific codebase?"*
+4. **Configuration File**: The designed layers are committed to `.tldrgraph/layers.config.yaml`.
+
+```mermaid
+flowchart TD
+    A[Repository AST Parser] --> B[Symbol & Route Inventory]
+    B --> C{Agent Layer Design}
+    C -->|Reads repo structure| D[.tldrgraph/layers.config.yaml]
+    D --> E[Multi-Layer Graph Classification]
+    E --> F[Cross-Layer Call Boundaries]
+```
+
+---
+
+## The `layers.config.yaml` Schema
+
+Here is an example layer configuration generated by an agent for a full-stack repository:
+
+```yaml
+version: 1
+layers:
+  - id: 1
+    name: "CLI & Agent Surface"
+    description: "Command-line entry points, agent subcommands, and interactive terminal dispatch."
+    patterns:
+      - "tldrgraph/cli*.py"
+      - "tldrgraph/agent_*.py"
+
+  - id: 2
+    name: "Pipeline & Ingestion"
+    description: "Graph loader orchestration, snapshot serialization, and cache sync."
+    patterns:
+      - "tldrgraph/graph_loader.py"
+      - "tldrgraph/snapshot_sync.py"
+
+  - id: 3
+    name: "Analysis & Extraction Engine"
+    description: "AST parsing, route extraction, client call resolution, and seam detection."
+    patterns:
+      - "tldrgraph/extractors*.py"
+      - "tldrgraph/flow_engine.py"
+
+  - id: 4
+    name: "Vector Index & Retrieval"
+    description: "FastEmbed ONNX dense embeddings, TF-IDF lexical search, and vector storage."
+    patterns:
+      - "tldrgraph/vector_*.py"
+      - "tldrgraph/dense_embedder.py"
+
+  - id: 5
+    name: "Visualization & Web UI"
+    description: "Browser canvas rendering, color palettes, and interactive workflow assembly."
+    patterns:
+      - "tldrgraph/visualizer/**"
+
+  - id: 6
+    name: "Core Types & Utilities"
+    description: "Path utilities, schema models, and shared helpers."
+    patterns:
+      - "tldrgraph/paths.py"
+      - "tldrgraph/labels.py"
+```
+
+---
+
+## Why Dynamic Layers Matter
+
+- **Cognitive Clarity**: Grouping hundreds of files into 4–7 coherent layers prevents mental overload.
+- **Architectural Guardrails**: Identifies unintended backward dependencies (e.g. database models importing UI views).
+- **Accurate Flow Slices**: Enables retrieval algorithms to extract complete cross-layer execution slices from entry point to database.
+# Cross-Layer Seams & AST Route Extraction
+
+Modern full-stack applications are glued together by dynamic boundaries: HTTP strings, RPC endpoints, client SDK calls, and ORM schema queries. Static language analyzers that only track explicit import statements miss the real cross-layer execution paths.
+
+TLDRGraph extracts **architectural seams**—the invisible bridges connecting disparate tiers.
+
+---
+
+## What is an Architectural Seam?
+
+An architectural seam represents a caller-to-callee relationship that traverses a network boundary or protocol layer:
+
+```mermaid
+sequenceDiagram
+    participant Frontend as Frontend (Client SDK)
+    participant API as API Route (Express / FastAPI)
+    participant Service as Business Service
+    participant Database as Database (ORM Model)
+
+    Frontend->>API: api.get("/users/:id")
+    Note over Frontend,API: Client Route Seam
+    API->>Service: UserService.getUser(id)
+    Note over API,Service: Internal Function Call
+    Service->>Database: UserModel.findUnique(...)
+    Note over Service,Database: ORM Data Seam
+```
+
+Without seam extraction, static call graphs see two disconnected subgraphs:
+1. A frontend that calls a URL string `api.get('/users/:id')`.
+2. A backend that handles `@app.get('/users/{id}')`.
+
+TLDRGraph bridges this gap deterministically using AST pattern analysis.
+
+---
+
+## Supported Seam Extractors
+
+### 1. HTTP Route Handlers (`extractors_route.py`)
+Identifies HTTP endpoints in backend frameworks:
+- **FastAPI / Flask**: `@app.get("/api/v1/resource")`, `@router.post(...)`
+- **Express / Next.js API**: `app.get('/api/users', ...)`, `export async function GET(req)`
+- **Django**: `path('api/items/', ItemView.as_view())`
+
+### 2. Client HTTP Calls (`extractors_client.py`)
+Extracts frontend and client-side outgoing network requests:
+- `fetch("/api/v1/resource")`
+- `axios.get("/api/v1/resource")`
+- `client.post(...)`
+
+### 3. ORM & Database Seams (`extractors_prisma.py`, SQLAlchemy)
+Maps domain models to database tables and query invocations:
+- **Prisma**: `prisma.user.findMany(...)`
+- **SQLAlchemy / Django ORM**: `User.objects.filter(...)`
+
+---
+
+## Seam Synthesis in the Graph
+
+Once seams are identified:
+1. Normalizes URLs (parameter placeholder normalization, e.g. `:id` $\leftrightarrow$ `{id}`).
+2. Synthesizes synthetic directed edges with `relation: "calls_route"` or `relation: "queries_model"`.
+3. Stores the line number and source snippet for both ends in `.tldrgraph/graph.json`.
+# Zero-Token SHA-256 Hash Gating
+
+AI code indexing tools often waste thousands of tokens re-analyzing files that haven't changed.
+
+TLDRGraph solves this with a zero-token **SHA-256 hash gating system** backed by a local SQLite cache.
+
+---
+
+## How Hash Gating Works
+
+```mermaid
+flowchart TD
+    A[Source File] --> B[Compute SHA-256 Hash]
+    B --> C{Match SQLite Cache?}
+    C -->|Hash Identical| D[Skip AST & Re-enrichment]
+    C -->|Hash Changed or New| E[Mark Node Dirty]
+    E --> F[Re-parse AST]
+    F --> G[Update SQLite Cache]
+```
+
+1. **Content Hashing**: Every source file is fingerprinted with a SHA-256 content signature before any parsing occurs.
+2. **Local Cache (`.tldrgraph/tldrgraph.db`)**: Stores file paths, last modified timestamps, AST symbol signatures, and enrichment summaries in an SQLite database.
+3. **Dirty Detection**:
+    - If a file's hash matches the stored signature, its existing AST nodes, intents, and embeddings are retained without modification.
+    - If the hash changed, only the symbols within that specific file are marked dirty and scheduled for incremental update.
+
+---
+
+## Benefits
+
+- **Token Cost Savings**: Re-running `tldrgraph init` on a 50,000-line codebase where only one file was modified spends **0 tokens** on the 49,900 unchanged lines.
+- **Instant CI Scans**: Pre-commit hooks and CI runs finish in milliseconds when checking cached snapshots.
+- **Persisted Summaries**: Human-approved LLM enrichments are never accidentally overwritten or lost during routine scans.
+# Hybrid Vector Retrieval & Dense Embeddings
+
+Accurate codebase retrieval requires combining two search modalities:
+1. **Lexical Search (Exact Identifiers)**: Matches exact variable names, class names, method symbols, and file paths.
+2. **Dense Semantic Search (Natural Language)**: Matches intent, architectural concepts, and natural language descriptions.
+
+TLDRGraph implements a hybrid retrieval engine combining **lexical TF-IDF** with **local FastEmbed ONNX dense embeddings**.
+
+---
+
+## The Dual-Channel Retrieval Architecture
+
+```mermaid
+graph TD
+    Query["User / Agent Query"] --> Lexical["Lexical TF-IDF Engine"]
+    Query --> Dense["FastEmbed ONNX (BAAI/bge-small-en-v1.5)"]
+    Lexical --> Scoring["Reciprocal Rank Fusion (RRF) & Layer Weighting"]
+    Dense --> Scoring
+    Scoring --> Slices["Layer-Grounded Execution Slices (~8,000 Tokens)"]
+```
+
+### 1. Lexical Search (`vector_tfidf.py`)
+- Tokenizes symbols using camelCase, snake_case, and dotted package conventions.
+- Weighs symbol identifiers, file path components, and docstring terms using BM25/TF-IDF scoring.
+
+### 2. Dense Embeddings (`dense_embedder.py`)
+- Employs **FastEmbed** running the optimized `BAAI/bge-small-en-v1.5` ONNX model.
+- **Runs entirely locally on CPU**: Requires no GPU, no CUDA, and no PyTorch installation.
+- Quantized and blazingly fast: query latency averages under 15ms.
+
+---
+
+## Layer-Grounded Execution Slices
+
+Standard RAG systems blindly return chunked paragraphs from random files. 
+
+TLDRGraph leverages its dynamic layer awareness:
+- When a query retrieves a function in the business layer, it traverses the graph upwards to find the entry point route in the API layer and downwards to find the database model.
+- It bundles these connected symbols into **Layer-Grounded Slices** (~8,000 tokens).
+- This ensures the LLM receives the full context of how data flows across all architectural boundaries.
+# Interactive Architecture Map
+
+The **Architecture Map** is a clustered, multi-layer visual canvas built into TLDRGraph. It compiles into a zero-dependency HTML file (`.tldrgraph/TLDRGRAPH_VISUALIZER.html`) that can be opened in any modern browser.
+
+<p align="center">
+  <img src="../../assets/architecture_map.png" alt="TLDRGraph Architecture Map" width="100%" />
+</p>
+
+---
+
+## Key Capabilities
+
+### 1. Clustered Multi-Layer Layout
+- Files and modules are grouped into colored architectural columns (Layer 1 through Layer 6).
+- Cross-layer connection lines show call relationships and dependencies between components.
+
+### 2. Zoom-Driven Level of Detail (LoD)
+- **Low Zoom**: Displays high-level file cards, layer boundaries, and inter-module traffic.
+- **Medium Zoom**: Reveals classes, structs, and public method signatures.
+- **High Zoom**: Shows method parameters, return types, docstrings, and decorator annotations.
+
+### 3. Click-to-Isolate Focus Mode
+Clicking any node instantly highlights:
+- **Upstream Callers**: Highlighted in bright green or cyan.
+- **Downstream Callees**: Highlighted in orange or purple.
+- **Unrelated Nodes**: Dimmed to eliminate background clutter.
+
+### 4. Live Source Viewer
+When running with `tldrgraph ui --serve`, clicking **View Code** opens an embedded live file viewer:
+- Reads the exact line range directly from disk.
+- Zero static HTML bloat: source code is served on-demand rather than pre-inlined into massive HTML bundles.
+
+### 5. ⚠️ Dead Nodes Filter
+Click the **Dead Nodes** toggle in the top navigation bar to isolate unreferenced candidate symbols that have zero callers across the entire repository.
+# Workflows Explorer
+
+The **Workflows Explorer** renders end-to-end execution pipelines and decision flows on a full-width background canvas.
+
+<p align="center">
+  <img src="../../assets/workflows_explorer.png" alt="TLDRGraph Workflows Explorer" width="100%" />
+</p>
+
+---
+
+## What Makes Workflows Different?
+
+While the **Architecture Map** shows static structural connections, the **Workflows Explorer** shows runtime execution order:
+- Which function is invoked first?
+- Where are the decision forks and validation checks?
+- Which methods are called at each step?
+- What database operations occur at the conclusion?
+
+---
+
+## Anatomy of a Workflow View
+
+### 1. Sequential Execution Axis
+- Steps are arranged chronologically along the horizontal axis.
+- Blue connecting pipes guide the eye through the primary happy path.
+
+### 2. Decision Branches (Diamonds)
+- Diamond shapes indicate conditional branches (`if/else`, validations, feature flags).
+- Hovering over a diamond reveals the branch condition and possible outcomes.
+
+### 3. Participating Method Clusters
+- Beneath each execution step, vertical sub-node columns display all participating methods, helper functions, and ORM operations executed during that step.
+
+### 4. Floating HUD & Interactive Controls
+- **Floating Left Sidebar**: Search workflows, filter by domain, or select a curated architectural pipeline.
+- **Workflow Header Card**: Shows title, layer badges, logical step count, and entry point signature.
+- **Canvas Zoom / Pan**: Smooth multi-touch trackpad and mouse wheel navigation with centering controls.
+# CLI Reference: Init, Scan & Enrich
+
+Commands for initializing and updating the repository graph.
+
+---
+
+## `tldrgraph init`
+
+Initializes or refreshes the multi-layer graph, discovers layers, and generates embeddings.
+
+```bash
+tldrgraph init [OPTIONS]
+```
+
+### Options
+
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--batch` | integer | `200` | Chunk size for LLM enrichment batching. |
+| `--limit` | integer | `None` | Caps total enriched nodes in this run. |
+| `--embeddings` | `auto` / `off` | `auto` | Toggle dense FastEmbed ONNX embedding generation. |
+| `--yes`, `-y` | boolean | `False` | Assume yes to confirmation prompts. |
+| `--json` | boolean | `False` | Output status as structured JSON. |
+
+### Aliases
+`tldrgraph scan` and `tldrgraph enrich` are aliases for `tldrgraph init`, maintained for backward compatibility.
+
+---
+
+## `tldrgraph install`
+
+Installs coding agent slash commands, skills, and execution rules across your local tools.
+
+```bash
+tldrgraph install [OPTIONS]
+```
+
+### Options
+
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--all-agents` | boolean | `False` | Install workflows for all supported agents regardless of project markers. |
+| `--tool` | string | `None` | Target a specific agent (e.g. `claude`, `cursor`, `codex`, `windsurf`). |
+
+---
+
+## Resumable States
+
+When running in automated agent workflows, `tldrgraph init` reports resumable execution states:
+
+| Status | Meaning | Action Required |
+| :--- | :--- | :--- |
+| `needs_layers` | Layers are unconfigured. | Agent reads code and designs `.tldrgraph/layers.config.yaml`. |
+| `needs_confirmation` | LLM token spend confirmation. | Agent prompts user once before enrichment batch. |
+| `needs_enrichment` | Nodes awaiting semantic summary. | Agent opens source files and adds architectural intent. |
+| `needs_embeddings` | Embeddings not yet compiled. | Downloads ONNX model and indexes vector store. |
+| `done` | Initialization complete. | Graph is ready for querying and visualization. |
+# CLI Reference: Query & Trace
+
+Commands for searching execution flows and tracing call paths.
+
+---
+
+## `tldrgraph query`
+
+Performs hybrid semantic search across the codebase and returns end-to-end execution flow tables.
+
+```bash
+tldrgraph query "<search prompt>" [OPTIONS]
+```
+
+### Examples
+
+```bash
+# Query an architectural flow in plain English
+tldrgraph query "how does user signup and email verification work"
+
+# Request top 10 execution flows
+tldrgraph query "jwt token validation" --top-k 10
+
+# Query using lexical TF-IDF only (skip dense model)
+tldrgraph query "database connection pool" --embeddings off
+```
+
+### Options
+
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--top-k` | integer | `5` | Number of flow paths to retrieve and format. |
+| `--embeddings` | `auto` / `off` | `auto` | Whether to use dense vector search or fall back to lexical. |
+| `--json` | boolean | `False` | Output results as JSON. |
+
+---
+
+## `tldrgraph trace`
+
+Finds the shortest cross-layer dependency path between two specific symbols.
+
+```bash
+tldrgraph trace "<SourceSymbol>" "<TargetSymbol>" [OPTIONS]
+```
+
+### Example
+
+```bash
+tldrgraph trace "AuthController" "UserRepository"
+```
+
+Output:
+```text
+Trace Path (3 hops, spans 3 layers):
+  [Layer 1: CLI & Agent Surface] AuthController (app/controllers/auth.py:24)
+    ──calls──> AuthService.login (app/services/auth.py:52)
+  [Layer 2: Pipeline & Ingestion] AuthService (app/services/auth.py:52)
+    ──queries──> UserRepository.find_by_email (app/repos/user.py:18)
+  [Layer 3: Analysis & Extraction Engine] UserRepository (app/repos/user.py:18)
+```
+
+### Options
+
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--directed` | boolean | `True` | Respect call direction (only trace forward calls). |
+| `--max-depth` | integer | `10` | Maximum call depth to explore. |
+| `--json` | boolean | `False` | Output raw path triples as JSON. |
+# CLI Reference: Analysis & Dead Code
+
+Tools for inspecting layers, reachability, and serving the visualizer.
+
+---
+
+## `tldrgraph dead-code`
+
+Surfaces unreferenced components, orphaned functions, and unused files across the repository.
+
+```bash
+tldrgraph dead-code [OPTIONS]
+```
+
+### Interpretation of Results
+
+- **Review Candidates**: The output lists symbols with zero incoming callers across known entry points.
+- **Unreviewed**: Signals that insufficient evidence exists to confirm whether a symbol is called dynamically (e.g. via reflection, dynamic dispatch, or external consumers).
+- **Never an Automatic Deletion List**: Always review candidates manually or with tests before removal.
+
+### Options
+
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--layer` | integer | `None` | Filter candidates by architectural layer ID. |
+| `--json` | boolean | `False` | Output dead-code candidates as JSON. |
+
+---
+
+## `tldrgraph layers`
+
+Prints a summary of all configured architectural layers, file patterns, and node counts.
+
+```bash
+tldrgraph layers [OPTIONS]
+```
+
+### Example Output
+
+```text
+Layer ID | Layer Name                    | Nodes | File Count
+---------+-------------------------------+-------+-----------
+Layer 1  | CLI & Agent Surface           |    42 |          4
+Layer 2  | Pipeline & Ingestion          |    38 |          3
+Layer 3  | Analysis & Extraction Engine  |    91 |          8
+Layer 4  | Vector Index & Retrieval      |    35 |          3
+Layer 5  | Visualization & Web UI        |    47 |          5
+Layer 6  | Core Types & Utilities        |    29 |          4
+```
+
+---
+
+## `tldrgraph ui`
+
+Generates and serves the interactive browser visualizer.
+
+```bash
+tldrgraph ui [OPTIONS]
+```
+
+### Options
+
+| Flag | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--serve` | boolean | `False` | Starts local HTTP server for on-demand live source code viewing. |
+| `--port` | integer | `7777` | Port for the live source server. |
+| `--no-open` | boolean | `False` | Generates HTML bundle without auto-opening a browser tab. |
+# Retrieval Benchmark: SWE-bench Lite
+
+To evaluate codebase localization performance against industry baselines, TLDRGraph was benchmarked on **40 real-world GitHub issues** from the standard **SWE-bench Lite** dataset.
+
+The task measures ground-truth modified file identification given only natural language problem statements written by real developers.
+
+---
+
+## 🎯 Benchmark Leaderboard
+
+| Retrieval Engine | File Recall@1 | File Recall@5 | File Recall@10 | MRR | Context Budget | Search Latency |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **BM25 Lexical Keyword Search** | 60.0% | 80.0% | 85.0% | 0.671 | ~28,500 tokens | 15.79 ms |
+| **Chunked Dense Vector RAG** | 70.0% | 95.0% | 95.0% | 0.797 | ~22,400 tokens | 32.82 ms |
+| **Graphify (AST Knowledge Graph)** | 45.0% | 80.0% | 82.5% | 0.591 | ~9,500 tokens | 1.22 ms |
+| **Aider Repo-Map (AST PageRank)** | 17.5% | 50.0% | 72.5% | 0.331 | ~8,200 tokens | 1.95 ms |
+| **Codebase-Memory-MCP (Vector Memory)** | 50.0% | 70.0% | 75.0% | 0.581 | ~14,200 tokens | 32.50 ms |
+| **PageIndex (Tree-Based ToC)** | 52.5% | 82.5% | 85.0% | 0.646 | ~11,000 tokens | 1.24 ms |
+| **TLDRGraph (AST Zero-Token)** | 57.5% | 75.0% | 85.0% | 0.659 | **~2,400 tokens** | 34.20 ms |
+| **TLDRGraph (Layer-Grounded Slices)** | **75.0%** | **92.5%** | **100.0%** | **0.823** | ~8,000 tokens | 81.91 ms |
+
+---
+
+## 💡 Key Analysis & Takeaways
+
+### 1. 100% Recall@10: Zero Missed Files
+**TLDRGraph (Layer-Grounded Slices)** is the only retrieval engine to achieve **100.0% Recall@10**. Across all 40 SWE-bench tasks, the target modified file was present within the top 10 retrieved candidates in every single run. 
+
+By anchoring vector retrieval in architectural layers and expanding along deterministic cross-layer seams, TLDRGraph eliminates the localization blind spots that plague standard chunking.
+
+### 2. SOTA Precision: 0.823 MRR & 75% Recall@1
+Mean Reciprocal Rank (MRR) measures how close to the top candidate the correct file is ranked:
+- In **75.0%** of cases, the very first file returned was the exact file that required patching.
+- Outperforms Chunked Dense RAG (70.0%), BM25 (60.0%), and Aider (17.5%).
+
+### 3. Context Token Efficiency
+- Flat vector RAG and BM25 require feeding **22,000 to 28,500 tokens** of noisy file chunks into LLM context.
+- TLDRGraph delivers higher localization accuracy with only **~8,000 tokens** (equalized budget) or **~2,400 tokens** in pure zero-token AST mode.
+
+### 4. Interactive Graphical Representation
+Beyond raw text snippets, TLDRGraph is paired with an interactive visualizer that enables engineers to inspect the exact call path, upstream triggers, and downstream side effects directly in their browser.
+# Supported Coding Agents
+
+TLDRGraph was built from day one to pair with modern AI coding assistants.
+
+---
+
+## Universal Agent Support
+
+Every supported agent receives byte-identical instructions and workflows. No tool receives special treatment or proprietary workarounds.
+
+| Agent Tool | Integration Method | File Location | Command |
+| :--- | :--- | :--- | :--- |
+| **Claude Code** | Native command file | `.claude/commands/tldrgraph-init.md` | `/tldrgraph-init` |
+| **Cursor** | Slash command | `.cursor/commands/tldrgraph-init.md` | `/tldrgraph-init` |
+| **Codex** | Agent skill | `.agents/skills/tldrgraph-init/SKILL.md` | `$tldrgraph-init` or `/skills` |
+| **Antigravity / Gemini CLI** | Cross-tool rules standard | `AGENTS.md` | Auto-invoked |
+| **Windsurf** | Workflows directory | `.windsurf/workflows/tldrgraph-init.md` | Slash workflow |
+| **Cline / Roo Code** | Rule and command workflows | `.clinerules/workflows/` | Slash workflow |
+| **KiloCode / OpenCode** | Custom commands | `.opencode/command/` | Command prompt |
+| **Continue.dev** | Custom prompt slash | `.continue/prompts/` | `/tldrgraph-init` |
+
+---
+
+## Automated Tool Detection
+
+Running `tldrgraph install` detects active configuration folders in your project:
+
+```bash
+tldrgraph install
+```
+
+If your project contains a `.cursor` or `.claude` folder, TLDRGraph automatically registers the appropriate command. 
+
+To install across every known agent environment:
+
+```bash
+tldrgraph install --all-agents
+```
+
+---
+
+## The Cross-Tool Standard: `AGENTS.md`
+
+TLDRGraph maintains `AGENTS.md` in your repository root. Most modern coding tools (Claude Code, Cursor, Codex, Antigravity, Copilot, Zed) parse `AGENTS.md` on startup.
+
+It instructs the agent to:
+1. **Never guess symbols or paths**: Always query the graph first using `tldrgraph query` or `tldrgraph trace`.
+2. **Respect architectural layers**: Avoid introducing backward dependencies.
+3. **Follow code health standards**: Maintain files $\le 400$ lines and functions $\le 50$ lines.
+# Agent Contract Specification
+
+TLDRGraph defines a formal request/response contract in `.tldrgraph/AGENT_CONTRACT.md`. This schema governs how agents interact with TLDRGraph in non-interactive or batch environments.
+
+---
+
+## The Contract Workflow
+
+```mermaid
+sequenceDiagram
+    participant Agent as Coding Agent
+    participant CLI as TLDRGraph CLI
+    participant Config as .tldrgraph/layers.config.yaml
+
+    Agent->>CLI: tldrgraph init --json
+    CLI-->>Agent: {"status": "needs_layers", "symbols": [...]}
+    Agent->>Config: Writes layers.config.yaml
+    Agent->>CLI: tldrgraph init --json
+    CLI-->>Agent: {"status": "needs_confirmation", "planned_nodes": 200}
+    Agent->>Agent: Prompt user for LLM spend approval
+    Agent->>CLI: tldrgraph init --batch 200 --yes --json
+    CLI-->>Agent: {"status": "done", "nodes": 350, "edges": 520}
+```
+
+---
+
+## Contract States & Payloads
+
+### 1. `needs_layers`
+Returned when `.tldrgraph/layers.config.yaml` is absent.
+
+```json
+{
+  "status": "needs_layers",
+  "reason": "Repository-specific architectural layers must be designed.",
+  "extracted_symbols_count": 420,
+  "top_directories": ["src/api", "src/services", "src/models"],
+  "next_action": "Read repository symbols and create .tldrgraph/layers.config.yaml"
+}
+```
+
+### 2. `needs_confirmation`
+Returned before the agent begins spending tokens on LLM summaries.
+
+```json
+{
+  "status": "needs_confirmation",
+  "total_nodes": 350,
+  "candidates_count": 180,
+  "planned_this_run": 180,
+  "batch_size": 200,
+  "agent_rounds": 1,
+  "next_action": "Ask user: 'TLDRGraph needs to enrich 180 architectural bottleneck symbols across 1 agent round. Proceed?'"
+}
+```
+
+### 3. `needs_enrichment`
+Returned when a batch of nodes is ready for semantic summarization.
+
+```json
+{
+  "status": "needs_enrichment",
+  "batch": [
+    {
+      "id": "tldrgraph/graph_loader.py::GraphLoader",
+      "type": "class",
+      "file": "tldrgraph/graph_loader.py",
+      "line_start": 45,
+      "line_end": 350,
+      "current_intent": null
+    }
+  ]
+}
+```
+
+### 4. `done`
+Returned when extraction, layer classification, enrichment, and vector embeddings are up to date.
+
+```json
+{
+  "status": "done",
+  "nodes_count": 350,
+  "edges_count": 520,
+  "layers_count": 6,
+  "embeddings_ready": true
+}
+```

@@ -1,0 +1,35 @@
+# TLDRGraph
+
+> Dynamic Multi-Layer Code Flow, Instant Semantic Call Tracing, and Interactive Architectural Navigation.
+
+TLDRGraph is an architectural analysis and retrieval engine for software codebases. It dynamically groups code into agent-designed architectural layers, extracts deterministic cross-layer execution seams, maintains zero-token SHA-256 hash gating, and provides both CLI execution flow tables and an interactive visualizer.
+
+## Documentation Index
+
+- [Overview & Quickstart](https://vikrantd.github.io/TLDRGraph/): High-level feature summary, philosophy, and interactive visualizer preview.
+- [Installation Guide](https://vikrantd.github.io/TLDRGraph/getting-started/installation/): Setup via pip (`pip install tldrgraph`), prerequisites (Python >= 3.10), and agent slash command installation.
+- [Quickstart Tour](https://vikrantd.github.io/TLDRGraph/getting-started/quickstart/): 5-minute agent-driven onboarding tour using `/tldrgraph-init`.
+- [Dynamic Architectural Layers](https://vikrantd.github.io/TLDRGraph/concepts/dynamic-layers/): Why static templates fail, how agents design custom layer boundaries, and `layers.config.yaml` schema.
+- [Cross-Layer Seams & Route Extraction](https://vikrantd.github.io/TLDRGraph/concepts/seams-and-routes/): Deterministic bridges between frontend client calls, API routes, and database models.
+- [Zero-Token Hash Gating](https://vikrantd.github.io/TLDRGraph/concepts/hash-gating/): SHA-256 signatures, SQLite cache, and zero-token incremental re-indexing.
+- [Hybrid Vector Retrieval](https://vikrantd.github.io/TLDRGraph/concepts/vector-retrieval/): Lexical TF-IDF + local FastEmbed ONNX dense embeddings (`BAAI/bge-small-en-v1.5`) running locally on CPU.
+- [Architecture Map Visualizer](https://vikrantd.github.io/TLDRGraph/visualizer/architecture-map/): Clustered multi-layer graph canvas, zoom-driven level of detail, caller/callee isolation, and live source viewing.
+- [Workflows Explorer Visualizer](https://vikrantd.github.io/TLDRGraph/visualizer/workflows-explorer/): BPMN-style decision workflows, horizontal execution axis, and participating method clusters.
+- [CLI Reference: Init, Scan & Enrich](https://vikrantd.github.io/TLDRGraph/cli-reference/init-and-scan/): Options, batching, limits, and resumable state handoff protocol.
+- [CLI Reference: Query & Trace](https://vikrantd.github.io/TLDRGraph/cli-reference/query-and-trace/): Natural language flow queries and shortest cross-layer dependency path tracing.
+- [CLI Reference: Analysis & Dead Code](https://vikrantd.github.io/TLDRGraph/cli-reference/analysis-tools/): Review unreachable symbols, view layer node distributions, and serve the UI.
+- [SWE-bench Lite Leaderboard](https://vikrantd.github.io/TLDRGraph/benchmarks/swe-bench/): Benchmark results demonstrating 100% Recall@10, 0.823 MRR, and token efficiency against BM25, Chunked RAG, and Aider.
+- [Supported Coding Agents](https://vikrantd.github.io/TLDRGraph/agents/integrations/): Native instructions and workflows for Claude Code, Cursor, Codex, Antigravity, Windsurf, and Roo Code.
+- [Agent Contract Specification](https://vikrantd.github.io/TLDRGraph/agents/contract-spec/): Complete JSON request/response schema specifications for agent orchestration.
+
+## Key CLI Commands
+
+- `tldrgraph init`: Run via coding agent workflow `/tldrgraph-init` to discover layers, enrich bottleneck symbols, and generate dense embeddings.
+- `tldrgraph query "<prompt>"`: Retrieve top 5 execution flows matching natural language questions about codebase logic.
+- `tldrgraph trace "<FromSymbol>" "<ToSymbol>"`: Find the exact shortest call path across layers between two classes or functions.
+- `tldrgraph dead-code`: Surface candidate unreferenced symbols with zero incoming callers across entry points.
+- `tldrgraph layers`: Print layer IDs, file patterns, and node counts.
+- `tldrgraph ui --serve`: Launch interactive browser visualizer with live source code viewing.
+
+## Optional
+- [Full LLM Documentation](https://vikrantd.github.io/TLDRGraph/llms-full.txt): Complete concatenated text documentation.

@@ -1,5 +1,6 @@
 site_name: TLDRGraph
 site_description: "Dynamic Multi-Layer Code Flow, Instant Semantic Call Tracing, and Interactive Architectural Navigation."
+site_author: Vikrant Dubey
 site_url: https://vikrantd.github.io/TLDRGraph/
 repo_url: https://github.com/vikrantd/TLDRGraph
 repo_name: vikrantd/TLDRGraph
