@@ -41,6 +41,12 @@ docs = [
 ]
 
 
+[project.urls]
+Homepage = "https://github.com/vikrantd/TLDRGraph"
+Documentation = "https://vikrantd.github.io/TLDRGraph/"
+Repository = "https://github.com/vikrantd/TLDRGraph"
+Issues = "https://github.com/vikrantd/TLDRGraph/issues"
+
 [project.scripts]
 tldrgraph = "tldrgraph.cli:main"
 codechakra = "tldrgraph.cli:main"
