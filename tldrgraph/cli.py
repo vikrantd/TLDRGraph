@@ -71,6 +71,7 @@ from .graph_loader import (
     resolve_call_target,
 )
 from .installer import ensure_gitignore, gitignore_warnings, install_agent_rules
+from .init_policy import resolve_default_on_embeddings
 from .layer_config import config_path
 from .layers import get_registry, layer_id_of
 from .propose_layers import (
@@ -86,7 +87,7 @@ embeddings_option = click.option(
     "--embeddings", "embeddings",
     type=click.Choice([vs_mod.POLICY_OFF, vs_mod.POLICY_AUTO, vs_mod.POLICY_ON]),
     default=None,
-    help="Policy override. Init defaults to 'on'; read commands default to cached-only 'auto'.",
+    help="Policy override. Init and query default to 'on'; other read commands default to cached-only 'auto'.",
 )
 
 _init_options = [
@@ -179,12 +180,12 @@ def visualizer_cmd(path, serve, port, open_browser):
 
 @cli.command()
 @click.argument("query_text")
-@click.option("--top-k", default=3, help="Number of flow candidates to return")
+@click.option("--top-k", default=5, show_default=True, help="Number of flow candidates to return")
 @click.option("--path", default=".", help="Repository root path")
 @embeddings_option
 def query(query_text, top_k, path, embeddings):
     """Hybrid search + trace end-to-end multi-layer execution flows. Read-only: never enriches."""
-    loader = GraphLoader(path, embeddings=embeddings)
+    loader = GraphLoader(path, embeddings=resolve_default_on_embeddings(embeddings))
     graph = loader.load_or_extract(enrich_llm=False)
     engine = FlowEngine(graph, loader.vector_store, root_dir=path)
     results = engine.query_flow(query_text, top_k=top_k)

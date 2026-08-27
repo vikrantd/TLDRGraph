@@ -13,11 +13,16 @@ APPROVAL_FILENAME = "enrichment_approval.json"
 APPROVAL_SCHEMA = "tldrgraph/enrichment-approval@1"
 
 
-def resolve_init_embeddings(requested: Optional[str]) -> str:
-    """Init downloads/builds embeddings unless explicitly overridden."""
+def resolve_default_on_embeddings(requested: Optional[str]) -> str:
+    """Enable downloads unless a CLI argument or environment override says otherwise."""
     if requested is None and not os.environ.get(EMBEDDINGS_ENV_VAR, "").strip():
         return POLICY_ON
     return resolve_policy(requested)
+
+
+def resolve_init_embeddings(requested: Optional[str]) -> str:
+    """Init downloads/builds embeddings unless explicitly overridden."""
+    return resolve_default_on_embeddings(requested)
 
 
 def embedding_failure(loader: Any) -> Optional[str]:

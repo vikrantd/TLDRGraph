@@ -100,7 +100,7 @@ Opens the interactive canvas:
 ```bash
 tldrgraph query "pension application approval flow"
 ```
-Outputs readable Markdown execution flow tables tracing the request across UI, API, Service, and DB layers.
+Outputs five readable Markdown execution flow tables by default, tracing the request across UI, API, Service, and DB layers. Queries use dense embeddings by default (and may download the configured model); use `--top-k`, `--embeddings auto`, or `--embeddings off` to override this behavior.
 
 ### 5. Trace Exact Call Paths
 ```bash
