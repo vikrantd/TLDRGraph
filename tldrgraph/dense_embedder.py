@@ -25,14 +25,14 @@ def resolve_policy(requested: Optional[str] = None) -> str:
     """Resolves policy from explicit argument or environment."""
     raw = (requested if requested is not None else os.environ.get(EMBEDDINGS_ENV_VAR, "")).strip().lower()
     if not raw:
-        return POLICY_OFF
+        return POLICY_AUTO
     if raw in (POLICY_OFF, POLICY_AUTO, POLICY_ON):
         return raw
     if raw in _TRUTHY:
         return POLICY_ON
     if raw in _FALSEY:
         return POLICY_OFF
-    return POLICY_OFF
+    return POLICY_AUTO
 
 
 def default_model_cache_dir() -> str:

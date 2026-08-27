@@ -1,6 +1,6 @@
 # TLDRGraph Agent Contract
 
-**Audience: the coding agent with this repository open** (Claude Code, Cursor, Antigravity).
+**Audience: the coding agent with this repository open** (Codex, Claude Code, Cursor, Antigravity).
 
 TLDRGraph builds an architectural graph from the graphify AST export. The layer set
 itself is designed by you, reading this repository. TLDRGraph ships no layer templates.
@@ -18,21 +18,22 @@ and a path (`snippet` is never populated), so it guesses. You do not have to gue
 
 ## Start here: `tldrgraph init`
 
-One command does everything, and it is resumable:
+One command handles layers, extraction, enrichment, and embeddings:
 
 ```bash
 tldrgraph init
 ```
 
-It runs every deterministic step — extraction, classification, indexing, applying whatever
-you last wrote — then stops with a `NEXT ACTION` block the moment it needs judgement only
-you can supply. Do what the block says and run it again. Repeat until `status: done`.
+It asks once before enrichment token spend. Full approval is persisted for the current
+candidate set until enrichment finishes, so continuation runs must not ask again. By
+default it uses 200-node batches and builds dense embeddings.
 
 | status | what it wants |
 | --- | --- |
 | `needs_layers` | Read the code and design this repository's architecture. **TLDRGraph ships no layer templates**; nothing will be applied for you. The request carries sketches of how other kinds of codebase divide — for shape only, never to copy. |
-| `needs_confirmation` | Enrichment costs the user tokens. Show them the estimate and ask. Then `tldrgraph init --yes`. |
-| `needs_enrichment` | A batch to open, read and describe, per the schema below. |
+| `needs_confirmation` | Show the estimate and ask once. Approval via `tldrgraph init --yes` persists until the current campaign is done. |
+| `needs_enrichment` | Open, read, and describe this batch, then continue immediately without asking again. |
+| `needs_embeddings` | Enrichment finished but the required dense model/index could not be built. Fix model access and rerun init. |
 | `done` | Nothing left. Use `query` / `trace` / `layers`. |
 
 `--json` gives you the same thing machine-readably. The sections below document the file
@@ -47,12 +48,19 @@ dropped, and will be reported back to you — but the work is wasted.
 ## The loop
 
 ```bash
-tldrgraph queue-enrichment --limit 50   # 1. writes .tldrgraph/enrichment_request.yaml
-#                                          2. you read it, read the SOURCE, and write
-#                                             .tldrgraph/enrichment_response.yaml
-tldrgraph apply-enrichment              # 3. merges into the graph, cache and index
-tldrgraph queue-enrichment --limit 50   # 4. repeat -- the queue advances automatically
+tldrgraph init --yes  # 1. approve every current candidate; writes a 200-node request
+#                       2. read every requested source and write enrichment_response.yaml
+tldrgraph init        # 3. applies it and emits the next batch; approval is remembered
+#                       4. repeat steps 2-3 without asking until status: done
 ```
+
+Inside an existing coding-agent session, nested-agent protection can prevent the CLI
+from launching another agent. In that case **you are the enrichment agent** and must
+process every batch yourself. Do not stop at `needs_enrichment`.
+
+`--batch 200` means process all candidates in chunks of 200. `--limit 200` means stop
+after only 200 candidates and is only for an explicitly requested partial run. Never add
+`--limit` or `--embeddings off` unless the user explicitly requests that behavior.
 
 Request and response are **separate files**. Never write your answer back into
 `enrichment_request.yaml`; it is regenerated on every run and your work would be lost.
@@ -62,6 +70,7 @@ Request and response are **separate files**. Never write your answer back into
 | `.tldrgraph/enrichment_request.yaml` (or `enrichment_request.json`) | `queue-enrichment` | you |
 | `.tldrgraph/enrichment_response.yaml` (or `enrichment_response.json`) | **you** | `apply-enrichment` |
 | `.tldrgraph/enrichment_cursor.json` | both commands | both commands |
+| `.tldrgraph/enrichment_approval.json` | `init --yes` | later `init` runs |
 | `.tldrgraph/pending_enrichment.json` | *(legacy)* | `apply-enrichment`, only if no response file exists |
 
 ---
@@ -76,8 +85,8 @@ contract: .tldrgraph/AGENT_CONTRACT.md
 progress:
   total_candidates: 1873   # un-enriched, non-utility nodes
   already_enriched: 12     # nodes that already carry an intent
-  queued_now: 50           # entries in "nodes" below
-  remaining_after: 1823     # still waiting after this batch is applied
+  queued_now: 200          # entries in "nodes" below
+  remaining_after: 1673    # still waiting after this batch is applied
 nodes:
   - id: backend_src_applications_applications_controller_applicationscontroller
     label: ApplicationsController
@@ -186,6 +195,10 @@ valid and useful.
 
 5. **Answer only the nodes in the request.** Extra ids are ignored; missing ids just come
    back in a later batch.
+
+6. **After full approval, never ask again for the same campaign.** Continue processing
+   `needs_enrichment` batches until `status: done`. Do not silently add `--limit` or
+   `--embeddings off`.
 
 ---
 

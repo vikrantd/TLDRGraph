@@ -312,6 +312,7 @@ def env_no_llm(monkeypatch):
     # Port 9 (discard) on loopback: refused instantly, never leaves the host.
     monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:9")
     monkeypatch.setenv("TLDRGRAPH_NO_AGENT", "1")
+    monkeypatch.setenv("TLDRGRAPH_EMBEDDINGS", "off")
     return True
 
 

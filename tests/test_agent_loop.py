@@ -696,6 +696,15 @@ def test_contract_documents_the_full_response_schema(tmp_path):
         assert token in text, token
 
 
+def test_contract_documents_persistent_full_campaign_approval(tmp_path):
+    written = installer_module.install_agent_rules(str(tmp_path))
+    text = Path(written["contract"]).read_text(encoding="utf-8")
+    assert "enrichment_approval.json" in text
+    assert "--batch 200" in text and "--limit 200" in text
+    assert "without asking" in text
+    assert "Never add" in text and "--embeddings off" in text
+
+
 def test_install_command_reports_the_gitignore_problem(tmp_path):
     (tmp_path / ".gitignore").write_text("node_modules\n.agents\n", encoding="utf-8")
     result = CliRunner().invoke(cli, ["install", "--path", str(tmp_path)])
@@ -714,8 +723,10 @@ def test_install_command_lists_what_it_wrote(tmp_path):
     result = CliRunner().invoke(cli, ["install", "--path", str(tmp_path)])
     assert result.exit_code == 0
     for key in ("contract", "gitignore", "AGENTS.md",
-                "Claude Code (command)", "Cursor (command)", "Antigravity (command)"):
+                "Claude Code (command)", "Cursor (command)", "Codex (command)"):
         assert key in result.output
+    assert "Codex: /skills" in result.output
+    assert "$tldrgraph-init" in result.output
 
 
 # --------------------------------------------------------------------------- #

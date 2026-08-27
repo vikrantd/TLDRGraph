@@ -33,6 +33,14 @@ from .graph_loader import GraphLoader
 from .installer import ensure_gitignore, install_agent_rules
 from .layer_config import config_path
 from .layers import get_registry
+from .init_policy import (
+    clear_enrichment_approval,
+    embedding_failure as _embedding_failure,
+    embedding_summary as _embedding_summary,
+    enrichment_approval_is_active,
+    remember_full_enrichment_approval,
+    resolve_init_embeddings,
+)
 from .propose_layers import (
     RESPONSE_FILENAME as PROPOSE_RESPONSE_FILENAME,
     apply_proposed_layers,
@@ -45,8 +53,8 @@ STATUS_DONE = "done"
 STATUS_NEEDS_LAYERS = "needs_layers"
 STATUS_NEEDS_CONFIRMATION = "needs_confirmation"
 STATUS_NEEDS_ENRICHMENT = "needs_enrichment"
+STATUS_NEEDS_EMBEDDINGS = "needs_embeddings"
 APPLIED_RESPONSE_FILENAME = "enrichment_response.applied.yaml"
-
 
 @contextlib.contextmanager
 def stdout_to_stderr_if(active: bool):
@@ -124,7 +132,7 @@ def _check_confirmation(candidates: List[Dict[str, Any]], total: int, enriched: 
         "",
         "ASK THE USER whether to proceed, showing them that estimate. Then:",
         "",
-        "  they agree          → tldrgraph init --yes",
+        "  they agree          → tldrgraph init --yes (approval persists until done)",
         "  smaller first pass  → tldrgraph init --yes --limit 100",
         "  they decline        → stop here; the graph is already usable",
     ], progress=progress, as_json=as_json)
@@ -148,14 +156,24 @@ def _run_agent_cli_enrichment(
 
     if not as_json:
         click.echo(f"\n🤖 Enriching via {agent.display}...")
-    totals = run_agent_enrichment(path, loader, agent, batch_size=batch_size, max_nodes=max_nodes, model=agent_model)
+    with stdout_to_stderr_if(as_json):
+        totals = run_agent_enrichment(
+            path, loader, agent, batch_size=batch_size, max_nodes=max_nodes, model=agent_model
+        )
     rem = len(enrichment_candidates(loader, compute_degrees(loader.graph)))
-    status = STATUS_DONE if not rem else STATUS_NEEDS_ENRICHMENT
-    emit_status(status, "enrichment", [
+    if not rem:
+        clear_enrichment_approval(path)
+    embedding_error = None if rem else _embedding_failure(loader)
+    status = STATUS_NEEDS_ENRICHMENT if rem else (
+        STATUS_NEEDS_EMBEDDINGS if embedding_error else STATUS_DONE
+    )
+    retry = ["Run `tldrgraph init --yes` to continue."] if rem or embedding_error else []
+    emit_status(status, "embeddings" if embedding_error else "enrichment", [
         f"Enriched {totals['applied']} node(s) in {totals['batches']} batch(es); {totals['bridges']} bridge edge(s).",
         f"{rem} still un-enriched." if rem else "Nothing left to enrich.",
-    ] + (["Run `tldrgraph init --yes` to continue."] if rem else []),
-        progress={**progress, "remaining": rem}, as_json=as_json)
+        f"Dense embeddings could not be completed: {embedding_error}" if embedding_error else _embedding_summary(loader),
+    ] + retry,
+        progress={**progress, "remaining": rem, "embedding_backend": loader.vector_store.backend}, as_json=as_json)
     return status
 
 
@@ -181,21 +199,36 @@ def _emit_manual_enrichment_handoff(
         "     symbol name is worse than none -- it poisons semantic search.",
         f"  3. Write {os.path.join(STATE_DIR, RESPONSE_FILENAME)} (YAML list of",
         "     {id, intent, input_fields, output_fields, calls}). Copy each id verbatim.",
-        "  4. Run: tldrgraph init",
+        "  4. Run: tldrgraph init (approval is remembered; do not ask again)",
     ], progress=progress, as_json=as_json)
     return STATUS_NEEDS_ENRICHMENT
 
 
-def _emit_enrichment_done(total: int, enriched: int, excluded: int, registry: Any, as_json: bool) -> str:
-    emit_status(STATUS_DONE, "enrichment", [
+def _emit_enrichment_done(loader: GraphLoader, total: int, enriched: int, excluded: int, registry: Any, as_json: bool) -> str:
+    embedding_error = _embedding_failure(loader)
+    status = STATUS_NEEDS_EMBEDDINGS if embedding_error else STATUS_DONE
+    lines = [
         f"{total} nodes across {len(registry)} layers. {enriched} enriched from source; {excluded} not eligible (utility bucket and prose nodes).",
+        "",
+    ]
+    if embedding_error:
+        lines.extend([
+            f"Dense embeddings could not be completed: {embedding_error}",
+            "Run `tldrgraph init --yes` again after fixing model access.",
+        ])
+    else:
+        lines.extend([
+        _embedding_summary(loader),
         "",
         '  tldrgraph query "<feature in plain English>"',
         '  tldrgraph trace "<Source>" "<Target>"',
         "  tldrgraph layers",
         "  tldrgraph ui --serve",
-    ], progress={"total_nodes": total, "enriched": enriched, "remaining": 0}, as_json=as_json)
-    return STATUS_DONE
+        ])
+    emit_status(status, "embeddings" if embedding_error else "enrichment", lines,
+                progress={"total_nodes": total, "enriched": enriched, "remaining": 0,
+                          "embedding_backend": loader.vector_store.backend}, as_json=as_json)
+    return status
 
 
 def _handle_enrichment_step(
@@ -219,7 +252,8 @@ def _handle_enrichment_step(
     excluded = total - enriched - len(candidates)
 
     if not candidates:
-        return _emit_enrichment_done(total, enriched, excluded, registry, as_json)
+        clear_enrichment_approval(path)
+        return _emit_enrichment_done(loader, total, enriched, excluded, registry, as_json)
 
     planned = min(len(candidates), max_nodes) if max_nodes else len(candidates)
     rounds = (planned + batch_size - 1) // batch_size
@@ -231,12 +265,19 @@ def _handle_enrichment_step(
         "planned_this_run": planned,
         "batch_size": batch_size,
         "agent_rounds": rounds,
+        "approval_persisted": enrichment_approval_is_active(path, candidates),
     }
 
-    if not assume_yes:
+    authorized = assume_yes or enrichment_approval_is_active(path, candidates)
+    if not authorized:
         conf_status = _check_confirmation(candidates, total, enriched, excluded, rounds, batch_size, progress, as_json)
         if conf_status:
             return conf_status
+        authorized = True
+
+    if authorized and not max_nodes:
+        remember_full_enrichment_approval(path, candidates)
+        progress["approval_persisted"] = True
 
     if agent_cli:
         res = _run_agent_cli_enrichment(path, loader, batch_size, max_nodes, agent_model, progress, as_json)
@@ -318,6 +359,9 @@ def init_pipeline(
     as_json: bool,
 ) -> str:
     root = os.path.abspath(path)
+    embeddings = resolve_init_embeddings(embeddings)
+    if rebuild or relayer:
+        clear_enrichment_approval(path)
     if not as_json:
         click.echo(f"🔄 [TLDRGraph] {root}")
 

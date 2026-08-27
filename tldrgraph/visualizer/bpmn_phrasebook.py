@@ -254,25 +254,25 @@ ELEMENT_PHRASES: Dict[str, Dict[str, str]] = {
         "say": "If the existing rules cannot be read",
         "when": "OSError",
     },
-    "tldrgraph/agent_commands.py:372:gateway": {
+    "tldrgraph/agent_commands.py:376:gateway": {
         "say": "Does the repo already have an AGENTS file?",
         "when": "os.path.isfile(agents_md)",
         "yes": "Update it", "no": "Skip it",
     },
-    "tldrgraph/agent_commands.py:376:error": {
+    "tldrgraph/agent_commands.py:380:error": {
         "say": "If the AGENTS file cannot be written",
         "when": "OSError",
     },
-    "tldrgraph/agent_commands.py:384:loop": {
+    "tldrgraph/agent_commands.py:388:loop": {
         "say": "For each coding agent this repo uses",
         "when": "active_targets(root, all_agents=all_agents)",
     },
-    "tldrgraph/agent_commands.py:385:gateway": {
+    "tldrgraph/agent_commands.py:389:gateway": {
         "say": "Does this agent support slash commands?",
         "when": "target.command_path",
         "yes": "Install the command", "no": "No commands",
     },
-    "tldrgraph/agent_commands.py:389:gateway": {
+    "tldrgraph/agent_commands.py:393:gateway": {
         "say": "Does this agent read an instructions file?",
         "when": "target.instructions_path",
         "yes": "Write the instructions", "no": "None needed",

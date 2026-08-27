@@ -52,6 +52,7 @@ from .cli_pipeline import (
     APPLIED_RESPONSE_FILENAME,
     STATUS_DONE,
     STATUS_NEEDS_CONFIRMATION,
+    STATUS_NEEDS_EMBEDDINGS,
     STATUS_NEEDS_ENRICHMENT,
     STATUS_NEEDS_LAYERS,
     apply_pending_enrichment_response,
@@ -85,22 +86,22 @@ embeddings_option = click.option(
     "--embeddings", "embeddings",
     type=click.Choice([vs_mod.POLICY_OFF, vs_mod.POLICY_AUTO, vs_mod.POLICY_ON]),
     default=None,
-    help="Retrieval backend policy. Defaults to $TLDRGRAPH_EMBEDDINGS, itself 'off'.",
+    help="Policy override. Init defaults to 'on'; read commands default to cached-only 'auto'.",
 )
 
 _init_options = [
     click.argument("path", default=".", type=click.Path(exists=True)),
     click.option("--yes", "-y", "assume_yes", is_flag=True,
-                 help="Proceed with enrichment without asking (agents: only after the user agrees)"),
-    click.option("--batch", "batch_size", default=25, show_default=True,
+                 help="Approve the current full enrichment campaign without asking again"),
+    click.option("--batch", "batch_size", default=200, show_default=True,
                  help="Nodes handed to the agent per round"),
     click.option("--limit", "max_nodes", default=0, show_default=True,
-                 help="Cap on nodes to enrich this run. 0 enriches every candidate."),
+                 help="Partial-run cap. 0 authorizes every current candidate."),
     click.option("--rebuild", is_flag=True, help="Re-extract and rebuild enrichment from scratch"),
     click.option("--relayer", is_flag=True, help="Discard the layer set and design it again"),
-    click.option("--agent-cli", is_flag=True,
-                 help="Shell out to an agent CLI (claude/cursor-agent/gemini) instead of "
-                      "handing off. Off by default: agent CLIs differ per tool and can hang."),
+    click.option("--agent-cli/--no-agent-cli", default=True, show_default=True,
+                 help="Automatically use a supported agent CLI for layers and enrichment; "
+                      "disable to use the file handoff workflow."),
     click.option("--agent-model", default=None,
                  help="Model for --agent-cli (e.g. opus, sonnet, gemini-2.5-pro). Defaults "
                       "to $TLDRGRAPH_AGENT_MODEL. Ignored on the handshake path, where your "
@@ -142,7 +143,7 @@ def cli():
 @cli.command()
 @_with_init_options
 def init(path, assume_yes, batch_size, max_nodes, rebuild, relayer, agent_cli, agent_model, as_json, embeddings):
-    """Build this repository's graph: layers, extraction, and enrichment, in one command."""
+    """Build layers, extract, enrich, and embed this repository in one command."""
     init_pipeline(path, assume_yes, batch_size, max_nodes, rebuild, relayer, agent_cli, agent_model, embeddings, as_json)
 
 
@@ -228,7 +229,7 @@ def layers(path):
 
 @cli.command("queue-enrichment")
 @click.option("--path", default=".", help="Repository root path")
-@click.option("--limit", default=50, show_default=True,
+@click.option("--limit", default=200, show_default=True,
               help="Maximum nodes to queue in this batch. 0 queues every remaining candidate.")
 @click.option("--requeue", is_flag=True,
               help="Also re-queue ids handed out earlier but never applied (abandoned batches).")
@@ -325,7 +326,7 @@ def doctor(path, embeddings, as_json):
 @cli.command()
 @click.option("--path", default=".", help="Repository root path")
 @click.option("--all-agents", is_flag=True,
-              help="Write the /tldrgraph-init command for every agent tool TLDRGraph knows.")
+              help="Write the tldrgraph-init workflow for every agent tool TLDRGraph knows.")
 def install(path, all_agents):
     """Install TLDRGraph rules and workflows for Codex and other coding agents."""
     gitignore = ensure_gitignore(path)
@@ -336,7 +337,8 @@ def install(path, all_agents):
             continue
         click.echo(f"  • {k}: {v}")
     click.echo(f"  • gitignore: {gitignore['path']} ({gitignore['status']})")
-    click.echo("\n💡 Your agent can now run /tldrgraph-init (or just `tldrgraph init`) to build the whole graph.")
+    click.echo("\n💡 Claude/Cursor: /tldrgraph-init · Codex: /skills → tldrgraph-init or $tldrgraph-init")
+    click.echo("   Any agent can also run `tldrgraph init` directly.")
     for warning in gitignore_warnings(path):
         click.echo(f"⚠️  {warning}")
 
