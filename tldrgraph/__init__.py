@@ -2,7 +2,7 @@
 TLDRGraph: Token-Efficient Hybrid Code Flow & Semantic Navigation Engine (Dynamic Multi-Layer)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Imported for its import-time side effect: it pins graphify's output directory
 # inside .tldrgraph/ before graphify can be imported and read the default. See
