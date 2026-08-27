@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/tldrgraph/"><img src="https://img.shields.io/badge/pypi-v0.2.0-3775A9.svg?logo=pypi&logoColor=white" alt="PyPI version"></a>
+  <a href="https://vikrantd.github.io/TLDRGraph/"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg?logo=materialformkdocs&logoColor=white" alt="Documentation"></a>
   <a href="https://pypi.org/project/tldrgraph/"><img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python&logoColor=white" alt="Python versions"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://github.com/safishamsi/graphify"><img src="https://img.shields.io/badge/AST%20Engine-Graphify-emerald.svg" alt="Powered by Graphify"></a>
@@ -23,6 +24,9 @@
 Modern codebases are messy. Microservices, multi-layer abstractions, dynamic API routes, and ORM calls create cognitive overload.
 
 **TLDRGraph** cuts through the noise. It dynamically classifies your repository into tailored architectural layers, extracts cross-layer execution seams, tracks changes using zero-token SHA-256 hash gating, and provides both **CLI flow tables** and a **lightning-fast standalone visualizer**.
+
+📖 **Read the full documentation**: [https://vikrantd.github.io/TLDRGraph/](https://vikrantd.github.io/TLDRGraph/)
+
 
 ---
 

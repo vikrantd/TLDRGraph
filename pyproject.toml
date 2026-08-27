@@ -35,6 +35,10 @@ embeddings = [
     "fastembed>=0.3",
     "numpy>=1.24",
 ]
+docs = [
+    "mkdocs-material>=9.5.0",
+    "mkdocs-minify-plugin>=0.8.0",
+]
 
 
 [project.scripts]

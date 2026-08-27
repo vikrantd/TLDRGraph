@@ -1,0 +1,97 @@
+site_name: TLDRGraph
+site_description: "Dynamic Multi-Layer Code Flow, Instant Semantic Call Tracing, and Interactive Architectural Navigation."
+site_url: https://vikrantd.github.io/TLDRGraph/
+repo_url: https://github.com/vikrantd/TLDRGraph
+repo_name: vikrantd/TLDRGraph
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  palette:
+    # Dark mode (default)
+    - scheme: slate
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    # Light mode
+    - scheme: default
+      primary: indigo
+      accent: cyan
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quickstart: getting-started/quickstart.md
+  - Concepts:
+      - Agent-Designed Layers: concepts/dynamic-layers.md
+      - Seams & Route Extraction: concepts/seams-and-routes.md
+      - Zero-Token Hash Gating: concepts/hash-gating.md
+      - Hybrid Vector Retrieval: concepts/vector-retrieval.md
+  - Interactive Visualizer:
+      - Architecture Map: visualizer/architecture-map.md
+      - Workflows Explorer: visualizer/workflows-explorer.md
+  - CLI Reference:
+      - Init, Scan & Enrich: cli-reference/init-and-scan.md
+      - Query & Trace: cli-reference/query-and-trace.md
+      - Analysis & Dead Code: cli-reference/analysis-tools.md
+  - Benchmarks:
+      - SWE-bench Lite Leaderboard: benchmarks/swe-bench.md
+  - Agent Integration:
+      - Supported Coding Agents: agents/integrations.md
+      - Agent Contract Specification: agents/contract-spec.md
