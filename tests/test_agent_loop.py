@@ -587,7 +587,7 @@ def test_dead_code_has_no_delete_capability(run):
 # Installer
 # --------------------------------------------------------------------------- #
 
-def test_install_writes_claude_cursor_and_antigravity(tmp_path):
+def test_install_writes_claude_cursor_and_codex(tmp_path):
     written = installer_module.install_agent_rules(str(tmp_path))
 
     # One body of instructions and one command, per tool. No tool gets bespoke
@@ -598,7 +598,7 @@ def test_install_writes_claude_cursor_and_antigravity(tmp_path):
         "AGENTS.md (instructions, all agents)": "AGENTS.md",
         "Claude Code (command)": ".claude/commands/tldrgraph-init.md",
         "Cursor (command)": ".cursor/commands/tldrgraph-init.md",
-        "Antigravity (command)": ".agents/skills/tldrgraph-init/SKILL.md",
+        "Codex (command)": ".agents/skills/tldrgraph-init/SKILL.md",
     }
     assert set(written) == set(expected)
     for key, rel in expected.items():
@@ -696,6 +696,15 @@ def test_contract_documents_the_full_response_schema(tmp_path):
         assert token in text, token
 
 
+def test_contract_documents_persistent_full_campaign_approval(tmp_path):
+    written = installer_module.install_agent_rules(str(tmp_path))
+    text = Path(written["contract"]).read_text(encoding="utf-8")
+    assert "enrichment_approval.json" in text
+    assert "--batch 200" in text and "--limit 200" in text
+    assert "without asking" in text
+    assert "Never add" in text and "--embeddings off" in text
+
+
 def test_install_command_reports_the_gitignore_problem(tmp_path):
     (tmp_path / ".gitignore").write_text("node_modules\n.agents\n", encoding="utf-8")
     result = CliRunner().invoke(cli, ["install", "--path", str(tmp_path)])
@@ -714,8 +723,10 @@ def test_install_command_lists_what_it_wrote(tmp_path):
     result = CliRunner().invoke(cli, ["install", "--path", str(tmp_path)])
     assert result.exit_code == 0
     for key in ("contract", "gitignore", "AGENTS.md",
-                "Claude Code (command)", "Cursor (command)", "Antigravity (command)"):
+                "Claude Code (command)", "Cursor (command)", "Codex (command)"):
         assert key in result.output
+    assert "Codex: /skills" in result.output
+    assert "$tldrgraph-init" in result.output
 
 
 # --------------------------------------------------------------------------- #
@@ -738,9 +749,98 @@ def test_scan_still_accepts_rebuild(loop_repo):
 
 def test_query_still_accepts_top_k_and_path(loop_repo):
     result = CliRunner().invoke(
-        cli, ["query", "pension calculation", "--top-k", "2", "--path", str(loop_repo)]
+        cli, ["query", "pension calculation", "--top-k", "2", "--path", str(loop_repo),
+              "--embeddings", "off"]
     )
     assert result.exit_code == 0, result.output
+
+
+def test_query_defaults_to_five_results_and_embeddings_on(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeLoader:
+        def __init__(self, path, embeddings):
+            captured["embeddings"] = embeddings
+            self.vector_store = object()
+
+        def load_or_extract(self, enrich_llm):
+            assert enrich_llm is False
+            return object()
+
+    class FakeEngine:
+        def __init__(self, graph, vector_store, root_dir):
+            pass
+
+        def query_flow(self, query_text, top_k):
+            captured["top_k"] = top_k
+            return []
+
+    monkeypatch.delenv("TLDRGRAPH_EMBEDDINGS", raising=False)
+    monkeypatch.setattr(cli_module, "GraphLoader", FakeLoader)
+    monkeypatch.setattr(cli_module, "FlowEngine", FakeEngine)
+
+    result = CliRunner().invoke(
+        cli, ["query", "pension calculation", "--path", str(tmp_path)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {"embeddings": "on", "top_k": 5}
+
+    captured.clear()
+    result = CliRunner().invoke(
+        cli, ["query", "pension calculation", "--path", str(tmp_path),
+              "--top-k", "2", "--embeddings", "off"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {"embeddings": "off", "top_k": 2}
+
+
+def test_query_help_displays_top_k_default():
+    result = CliRunner().invoke(cli, ["query", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "--top-k" in result.output
+    assert "default: 5" in result.output
+
+
+@pytest.mark.parametrize(
+    "environment,args,expected",
+    [
+        ("off", [], "off"),
+        ("off", ["--embeddings", "auto"], "auto"),
+        ("auto", ["--embeddings", "on"], "on"),
+    ],
+)
+def test_query_embedding_overrides_preserve_precedence(
+    monkeypatch, tmp_path, environment, args, expected
+):
+    captured = {}
+
+    class FakeLoader:
+        def __init__(self, path, embeddings):
+            captured["embeddings"] = embeddings
+            self.vector_store = object()
+
+        def load_or_extract(self, enrich_llm):
+            return object()
+
+    class FakeEngine:
+        def __init__(self, graph, vector_store, root_dir):
+            pass
+
+        def query_flow(self, query_text, top_k):
+            return []
+
+    monkeypatch.setenv("TLDRGRAPH_EMBEDDINGS", environment)
+    monkeypatch.setattr(cli_module, "GraphLoader", FakeLoader)
+    monkeypatch.setattr(cli_module, "FlowEngine", FakeEngine)
+
+    result = CliRunner().invoke(
+        cli, ["query", "pension calculation", "--path", str(tmp_path), *args]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["embeddings"] == expected
 
 
 def test_state_filenames_are_the_documented_ones():

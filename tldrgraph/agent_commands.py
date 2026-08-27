@@ -30,12 +30,12 @@ from typing import Dict, List, Optional, Tuple
 BLOCK_BEGIN = "<!-- BEGIN TLDRGRAPH -->"
 BLOCK_END = "<!-- END TLDRGRAPH -->"
 
-#: The command name installed everywhere. Deliberately not bare `tldrgraph`:
+#: The workflow name installed everywhere. Deliberately not bare `tldrgraph`:
 #: that would collide with the package's own CLI name in some shells.
 COMMAND_NAME = "tldrgraph-init"
 
-#: The cross-tool instructions standard. Read by Claude Code, Cursor, Antigravity,
-#: opencode, Codex, Gemini CLI, Zed and Copilot, so those tools need no file of their own.
+#: The cross-tool instructions standard. Read by Claude Code, Cursor, Codex,
+#: Antigravity, opencode, Gemini CLI, Zed and Copilot, so those tools need no file of their own.
 AGENTS_MD = "AGENTS.md"
 
 
@@ -49,13 +49,14 @@ class AgentTarget:
     frontmatter: bool = True
 
 
-#: Every tool TLDRGraph knows, with paths for commands and instructions.
+#: Every tool TLDRGraph knows, with paths for commands, skills, and instructions.
 TARGETS: Tuple[AgentTarget, ...] = (
     AgentTarget("Claude Code", command_path=f".claude/commands/{COMMAND_NAME}.md"),
     AgentTarget("Cursor", command_path=f".cursor/commands/{COMMAND_NAME}.md"),
     AgentTarget("opencode", command_path=f".opencode/command/{COMMAND_NAME}.md",
                 marker=".opencode"),
-    AgentTarget("Antigravity",
+    # Codex's repository-local skill convention. Antigravity also reads this path.
+    AgentTarget("Codex",
                 command_path=f".agents/skills/{COMMAND_NAME}/SKILL.md"),
     AgentTarget("Cline",
                 command_path=f".clinerules/workflows/{COMMAND_NAME}.md",
@@ -90,9 +91,7 @@ SUPERSEDED = (
 )
 
 
-# --------------------------------------------------------------------------- #
-# The single source of content
-# --------------------------------------------------------------------------- #
+# The single source of content.
 
 #: Always-loaded context. Short on purpose: it competes with everything else in
 #: the agent's window, so it says what TLDRGraph is for and where the detail is.
@@ -121,10 +120,10 @@ tldrgraph dead-code                            # review candidates, never a dele
 
 Those are read-only and never trigger enrichment.
 
-**To build or continue the graph**, run `tldrgraph init`, do what the `NEXT ACTION`
-block prints, and run it again -- repeat until `status: done`. It has no template
-fallback: if this repository has no architecture yet, it will stop and ask you to
-design one from the code. Do not skip reading the files.
+**To build or refresh the graph**, run `tldrgraph init`. It automatically handles
+layer design, extraction, source-aware enrichment in 200-node batches, and dense
+embeddings when a supported agent CLI is available. If it prints a `NEXT ACTION`
+fallback, follow that handoff without guessing from symbol names.
 
 Full workflow: `.claude/commands/{COMMAND_NAME}.md` (identical copies live in every
 other agent directory). Schema: `.tldrgraph/AGENT_CONTRACT.md`.
@@ -138,21 +137,35 @@ other agent directory). Schema: `.tldrgraph/AGENT_CONTRACT.md`.
 - **Modularity & Re-exports**: Keep modules decoupled; preserve backwards compatibility with top-level package re-exports.
 """
 
-#: The full workflow. Every branch of the `init` state machine, spelled out.
+#: The full `init` workflow.
 COMMAND_BODY = """# TLDRGraph: build this repository's architecture graph
 
-One command, run repeatedly until it says DONE. `tldrgraph init` never guesses:
-it stops and tells you exactly what it needs.
+In Claude Code or Cursor, invoke `/tldrgraph-init`. In Codex CLI, type `/skills`
+and select `tldrgraph-init`, or mention `$tldrgraph-init` directly.
+
+One command handles layer design, extraction, enrichment, and embeddings:
 
 ```bash
 tldrgraph init
 ```
 
-Read the `NEXT ACTION` block it prints, do what it says, then run `tldrgraph init`
-again. Repeat until the output says `status: done`. There are only three things
-it can ask for.
+By default TLDRGraph detects `claude`, `cursor-agent`, or `gemini`, asks once before enrichment token spend, processes every
+eligible node in batches of 200, and downloads/builds the local embedding model.
+Use `--yes` for non-interactive approval, `--batch N` to override the batch size,
+`--embeddings off|auto|on` to override embeddings, or `--no-agent-cli` for the
+manual file handoff.
 
-## 1. `status: needs_layers`
+After the user approves the full run, use exactly `tldrgraph init --yes`. The
+approval is saved for the current candidate set, so later `tldrgraph init` calls
+must continue without asking again. `--batch 200` means all nodes in 200-node
+batches; `--limit 200` means stop after only 200 nodes. Never add `--limit` or
+`--embeddings off` unless the user explicitly requests a partial or no-embedding run.
+
+If no supported agent is available or dense embeddings cannot be built, `init`
+preserves the graph and prints a resumable status. It never guesses source intent
+or architectural layers.
+
+## `status: needs_layers`
 
 TLDRGraph ships **no layer templates** and will not invent an architecture.
 Design one from this repository.
@@ -183,25 +196,7 @@ Design one from this repository.
 }
 ```
 
-4. Run `tldrgraph init` again.
-
-### What a layer set looks like
-
-Sketches from other codebases, to show the *shape* of an answer. They are not a
-menu and none of them will fit this repository -- read the code and name what you
-actually find.
-
-- A web app might split presentation from request handling from domain logic
-  from persistence, with background jobs and deployment config as their own tiers.
-- A CLI tool might split the command surface from the processing engine from
-  local state, with adapters to outside systems separate again.
-- A library might split its public API from the core implementation from its
-  data types, with backend adapters separate.
-- A data pipeline might split ingestion from transformation from model training
-  from serving.
-
-The useful question is not "which of these is it?" but "where does responsibility
-change hands in *this* code, and what would a new engineer need named?"
+4. Run `tldrgraph init` again; it continues with enrichment and embeddings.
 
 ### Rules that hold for any answer
 
@@ -214,17 +209,17 @@ change hands in *this* code, and what would a new engineer need named?"
 - Derive rules from paths and symbol names you actually saw. A rule matching
   nothing is worse than no rule; a rule matching everything collapses the map.
 
-## 2. `status: needs_confirmation`
+## `status: needs_confirmation`
 
 The output shows how many nodes need enrichment and how many agent round-trips
 that implies. **Ask the user whether to proceed, and show them that estimate.**
 Do not decide for them.
 
-- They agree: `tldrgraph init --yes`
+- They agree: `tldrgraph init --yes` saves approval for the full campaign
 - Smaller first pass: `tldrgraph init --yes --limit 100`
 - They decline: stop. The graph is already built and queryable.
 
-## 3. `status: needs_enrichment`
+## `status: needs_enrichment`
 
 1. Read `.tldrgraph/enrichment_request.yaml`.
 2. **Open the source file of every node in it.** This is the entire point: an
@@ -242,8 +237,14 @@ Do not decide for them.
   calls: [ApplicationsService, pension_cases]
 ```
 
-4. Run `tldrgraph init --yes` again. It applies the response and hands you the
-   next batch, until there is nothing left.
+4. Run `tldrgraph init` again. Approval is already saved. If another
+   `needs_enrichment` batch appears, process it immediately and repeat this loop
+   without asking the user again. Continue until `status: done`.
+
+Inside an existing Codex/Claude/Cursor session, nested-agent protection may stop
+the CLI from launching a second agent. In that case **you are the enrichment
+agent**: process every 200-node batch yourself. A `needs_enrichment` status is a
+continuation instruction, not a reason to stop or request confirmation.
 
 **Copy every `id` verbatim.** A constructed id matches nothing, is dropped, and
 gets reported back to you -- but the work is wasted.

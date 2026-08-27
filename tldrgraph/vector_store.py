@@ -1,5 +1,5 @@
 """
-Local Vector Store for TLDRGraph: TF-IDF (default) and FastEmbed hybrid retrieval (optional opt-in, falls back to TF-IDF, 100% offline, $0 token cost).
+Local Vector Store for TLDRGraph: FastEmbed hybrid retrieval when its model is cached, with a 100% offline TF-IDF fallback.
 """
 
 from __future__ import annotations

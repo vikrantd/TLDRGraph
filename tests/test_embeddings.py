@@ -7,10 +7,10 @@ Two hard constraints shape everything here:
 1. **Nothing in this file may touch the network or download a model.** Every
    dense-path test is gated on the model already being cached locally and skips
    cleanly otherwise, and the gate itself is pure filesystem inspection. The
-   TF-IDF path -- which is what CI and the default install actually run -- is
-   covered unconditionally.
+   TF-IDF path -- which CI selects explicitly to stay offline -- is covered
+   unconditionally.
 
-2. **TF-IDF must remain byte-for-byte the default.** Bridge resolution in
+2. **TF-IDF remains the offline fallback.** Bridge resolution in
    ``graph_loader`` / ``cli`` resolves agent-supplied ``calls`` names through
    ``search()`` against a 0.35 floor. That is exact-identifier retrieval, TF-IDF
    is good at it, and a dense backend silently taking over would wreck it.
@@ -115,10 +115,10 @@ def hybrid_store(index_path):
 # The default is TF-IDF, and it is honest about it
 # --------------------------------------------------------------------------- #
 
-def test_default_backend_is_tfidf(index_path, monkeypatch):
+def test_default_policy_uses_cached_embeddings_only(index_path, monkeypatch):
     monkeypatch.delenv(vs.EMBEDDINGS_ENV_VAR, raising=False)
     store = LocalVectorStore(index_path)
-    assert store.policy == vs.POLICY_OFF
+    assert store.policy == vs.POLICY_AUTO
     assert store.backend == BACKEND_TFIDF
 
 
@@ -128,7 +128,7 @@ def test_off_policy_never_imports_fastembed(index_path, monkeypatch):
     reach for fastembed at all, so an install without it behaves identically.
     """
     monkeypatch.delenv(vs.EMBEDDINGS_ENV_VAR, raising=False)
-    store = LocalVectorStore(index_path)
+    store = LocalVectorStore(index_path, embeddings="off")
     store.add_documents([dict(d) for d in DOCS])
 
     assert store.embedder is None
@@ -138,8 +138,8 @@ def test_off_policy_never_imports_fastembed(index_path, monkeypatch):
 
 
 @pytest.mark.parametrize("value,expected", [
-    (None, vs.POLICY_OFF),
-    ("", vs.POLICY_OFF),
+    (None, vs.POLICY_AUTO),
+    ("", vs.POLICY_AUTO),
     ("off", vs.POLICY_OFF),
     ("0", vs.POLICY_OFF),
     ("false", vs.POLICY_OFF),
@@ -148,7 +148,7 @@ def test_off_policy_never_imports_fastembed(index_path, monkeypatch):
     ("on", vs.POLICY_ON),
     ("1", vs.POLICY_ON),
     ("true", vs.POLICY_ON),
-    ("nonsense", vs.POLICY_OFF),
+    ("nonsense", vs.POLICY_AUTO),
 ])
 def test_policy_parsing(value, expected, monkeypatch):
     monkeypatch.delenv(vs.EMBEDDINGS_ENV_VAR, raising=False)
@@ -174,7 +174,6 @@ def test_module_docstring_does_not_overclaim():
     doc = vs.__doc__ or ""
     assert "TF-IDF" in doc
     lowered = doc.lower()
-    assert "optional" in lowered or "opt-in" in lowered
     assert "falls back" in lowered or "fall back" in lowered or "fallback" in lowered
 
 
@@ -374,7 +373,7 @@ def test_diagnostics_reports_the_backend_that_is_really_live(tfidf_store):
 
 def test_diagnostics_explains_why_dense_is_off(index_path, monkeypatch):
     monkeypatch.delenv(vs.EMBEDDINGS_ENV_VAR, raising=False)
-    d = LocalVectorStore(index_path).diagnostics()
+    d = LocalVectorStore(index_path, embeddings="off").diagnostics()
     assert d["embedder_available"] is False
     assert d["embedder_reason"], "doctor must always be able to say WHY"
 

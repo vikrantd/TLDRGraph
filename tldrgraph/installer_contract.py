@@ -32,22 +32,26 @@ def generate_layers_prose(registry: Optional[LayerRegistry] = None) -> str:
     return "\n".join(lines)
 
 
-_LOOP = """One command does everything -- layers, extraction, enrichment -- and is resumable:
+_LOOP = """One command does everything -- layers, extraction, enrichment, and embeddings:
 
 ```bash
-tldrgraph init          # prints a NEXT ACTION block whenever it needs you
-# do exactly what that block says (design layers, or read source and write intents)
-tldrgraph init --yes    # run it again; repeat until it prints status: done
+tldrgraph init          # interactive: asks once before enrichment token spend
+tldrgraph init --yes    # approve every current candidate until the campaign is done
 ```
 
-`init` never guesses. It has no template to fall back on, so if this repository has no
-architecture yet it stops and asks you to design one from the code. When it needs
-enrichment it hands you a batch, and you OPEN THE SOURCE FILES before writing anything.
+`init` automatically detects a supported agent CLI, uses 200-node enrichment batches,
+and downloads/builds dense embeddings. It never guesses: when no agent is usable it
+preserves the graph and prints a manual layer or enrichment handoff.
+
+Full approval is persisted across continuation runs. In a nested coding-agent session,
+the host agent must read, answer, and apply every 200-node batch without asking again.
+`--batch 200` means all nodes in chunks; `--limit 200` means only 200 total. Never add
+`--limit` or `--embeddings off` unless the user explicitly requests it.
 
 The underlying steps stay available for scripting:
 
 ```bash
-tldrgraph queue-enrichment --limit 50   # writes .tldrgraph/enrichment_request.yaml
+tldrgraph queue-enrichment --limit 200  # writes .tldrgraph/enrichment_request.yaml
 tldrgraph apply-enrichment              # merges intents + bridge edges into the graph
 ```
 
@@ -63,7 +67,9 @@ _RULES_SHORT = """- **Read the source file before writing an intent.** You have 
   (`ApplicationsService`), file names (`calc.ts`), IDs, and table names (`pension_cases`)
   match with 100% confidence; fallback vector search handles related terms with a 0.35 score floor.
 - **Write the response to a different file than the request.** The request is regenerated
-  on every run."""
+  on every run.
+- **Continue after approval until `status: done`.** A `needs_enrichment` batch is work to
+  process, not a reason to ask again. Do not add `--limit` or `--embeddings off`."""
 
 _RESPONSE_SCHEMA = """```yaml
 - id: "<node id copied verbatim from the request>"
@@ -109,6 +115,7 @@ the files.
 | --- | --- | --- |
 | `.tldrgraph/enrichment_request.json` | `queue-enrichment` | you |
 | `.tldrgraph/enrichment_response.json` | **you** | `apply-enrichment` |
+| `.tldrgraph/enrichment_approval.json` | `init --yes` | continuation runs |
 | `.tldrgraph/pending_enrichment.json` | *(legacy)* | `apply-enrichment`, only if no response file exists |
 
 ## Response schema

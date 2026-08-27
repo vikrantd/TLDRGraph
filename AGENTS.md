@@ -24,10 +24,10 @@ tldrgraph dead-code                            # review candidates, never a dele
 
 Those are read-only and never trigger enrichment.
 
-**To build or continue the graph**, run `tldrgraph init`, do what the `NEXT ACTION`
-block prints, and run it again -- repeat until `status: done`. It has no template
-fallback: if this repository has no architecture yet, it will stop and ask you to
-design one from the code. Do not skip reading the files.
+**To build or refresh the graph**, run `tldrgraph init`. It automatically handles
+layer design, extraction, source-aware enrichment in 200-node batches, and dense
+embeddings when a supported agent CLI is available. If it prints a `NEXT ACTION`
+fallback, follow that handoff without guessing from symbol names.
 
 Full workflow: `.claude/commands/tldrgraph-init.md` (identical copies live in every
 other agent directory). Schema: `.tldrgraph/AGENT_CONTRACT.md`.

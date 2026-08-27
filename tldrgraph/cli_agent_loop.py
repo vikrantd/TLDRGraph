@@ -117,7 +117,7 @@ def run_agent_enrichment(
     path: str,
     loader: GraphLoader,
     agent: Any,
-    batch_size: int = 25,
+    batch_size: int = 200,
     max_nodes: int = 0,
     model: Optional[str] = None,
 ) -> Dict[str, Any]:
