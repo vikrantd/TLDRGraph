@@ -1,17 +1,15 @@
 """
 Host coding-agent runner for TLDRGraph.
 
-**This is the secondary path.** TLDRGraph is normally driven *by* an agent
-through the file handshake in ``tldrgraph init``, which works with every tool
-because it only needs "read a file, read source, run a command". Shelling out is
-opt-in (``--agent-cli``) and exists for a plain terminal with no agent attached.
+TLDRGraph normally detects and launches a supported agent CLI from ``tldrgraph
+init``. The file handshake remains the portable fallback when no CLI is usable
+or when ``--no-agent-cli`` is selected.
 
-It is not the default for good reasons, all observed in the field: every CLI has
-different flags, auth and headless semantics; a blocking ``subprocess.run`` shows
-the user nothing while the agent thinks; and some IDEs ship no usable CLI at all
-(Antigravity's ``agy`` is a broken symlink on a stock install).
+Agent CLIs still differ in flags, authentication, and headless behavior, and some
+IDEs ship no usable CLI at all. Discovery and failures therefore always fall
+back without discarding the graph.
 
-Nesting is refused. When TLDRGraph is itself being run by a coding agent
+Nesting is still refused. When TLDRGraph is itself being run by a coding agent
 (``CLAUDECODE``, ``CURSOR_AGENT``, ...), spawning a second agent burns tokens to
 duplicate context the host already has, so the host is told what to do instead.
 ``TLDRGRAPH_AGENT_NESTED=1`` overrides.
@@ -23,9 +21,8 @@ Environment:
     TLDRGRAPH_AGENT_TIMEOUT=<s> per-call timeout in seconds (default 600)
     TLDRGRAPH_AGENT_MODEL=<id>  model to pass to the agent CLI
 
-Model choice only applies to the CLI shell-out. When your own agent drives
-TLDRGraph through the file handshake -- the normal path -- the model is whatever
-that session is already using, chosen in your IDE.
+Model choice only applies to the CLI shell-out. When an existing host agent
+drives the file-handshake fallback, the model is whatever that session uses.
 """
 
 from __future__ import annotations

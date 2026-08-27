@@ -49,34 +49,41 @@ wrong everywhere it looks right.
 ```bash
 pip install tldrgraph
 ```
-*(For optional local ONNX neural embeddings: `pip install "tldrgraph[embeddings]"`)*
+### 2. Build the graph — through your coding agent
 
-### 2. Build the graph — one command
-```bash
-tldrgraph init
-```
+**Do not run `tldrgraph init` manually in a terminal.** Start the
+`tldrgraph-init` workflow in whichever coding agent you use; the agent reads the
+repository, runs `init`, and handles every required follow-up. In Claude Code or
+Cursor, run `/tldrgraph-init`. In Codex, open `/skills` and select
+`tldrgraph-init`, or invoke `$tldrgraph-init`.
 
-`init` is a resumable state machine. It runs every step it can — extraction,
-classification, indexing, enrichment — and stops with a `NEXT ACTION` block the
-moment it needs judgement only an agent can supply. Do what the block says, run
-it again, repeat until it prints `status: done`.
+The agent designs the repository-specific layers, extracts the graph, asks once
+before enrichment token spend, enriches every eligible node in 200-node batches,
+and downloads/builds local dense embeddings. That approval is remembered for the
+current candidate set until enrichment is complete.
 
-It can ask for exactly three things:
+`--batch 200` controls chunk size while still processing everything. `--limit
+200` intentionally stops after 200 total nodes. Embeddings remain enabled unless
+you explicitly pass `--embeddings off`.
+
+If no supported agent is usable, it preserves everything already built and
+prints a `NEXT ACTION` handoff. Follow that handoff and rerun the same command;
+TLDRGraph never invents architecture or source intent.
+
+It can report four resumable states:
 
 | status | what it needs |
 | --- | --- |
 | `needs_layers` | Read the code and design the architecture. No template will be applied for you. |
 | `needs_confirmation` | Shows how many nodes need enrichment and how many agent rounds that is. **Your agent asks you before spending tokens.** |
 | `needs_enrichment` | A batch of nodes to open, read, and describe. |
+| `needs_embeddings` | Enrichment is complete, but the required dense model/index could not be built. |
 
-```bash
-tldrgraph init --yes              # proceed past the estimate
-tldrgraph init --yes --limit 100  # smaller first pass
-tldrgraph init --json             # machine-readable status for agents
-```
-
-Your agent can drive the whole thing with the installed `/tldrgraph-init`
-command. `scan` and `enrich` are aliases for `init`, kept for existing scripts.
+Your agent drives the whole process with the installed `tldrgraph-init`
+workflow. Give it any scope or batch-size constraints you need; it will choose
+the appropriate `init` options. `scan` and `enrich` are aliases for `init`, kept
+for existing scripts, and should likewise be run by the agent rather than
+manually.
 
 ### 3. Explore the Architecture Visually
 ```bash
@@ -93,7 +100,7 @@ Opens the interactive canvas:
 ```bash
 tldrgraph query "pension application approval flow"
 ```
-Outputs readable Markdown execution flow tables tracing the request across UI, API, Service, and DB layers.
+Outputs five readable Markdown execution flow tables by default, tracing the request across UI, API, Service, and DB layers. Queries use dense embeddings by default (and may download the configured model); use `--top-k`, `--embeddings auto`, or `--embeddings off` to override this behavior.
 
 ### 5. Trace Exact Call Paths
 ```bash
@@ -131,10 +138,9 @@ To evaluate codebase localization performance against industry baselines, TLDRGr
 
 ## 🤖 Works with any coding agent
 
-TLDRGraph is driven **by** your agent, not the other way around. It never needs
-to launch one, so there are no per-tool flags, auth or headless quirks to get
-wrong — any agent that can read a file, read source, and run a shell command can
-drive it.
+TLDRGraph automatically launches a supported agent CLI when possible. Inside an
+existing coding-agent session, or when no supported CLI is authenticated, it
+falls back to a portable file handoff that any agent can drive.
 
 Every tool gets the **same two artifacts and no more**: one body of instructions
 and one `tldrgraph-init` command, byte-identical everywhere.
@@ -146,9 +152,11 @@ and one `tldrgraph-init` command, byte-identical everywhere.
 | **Command / skill** | `.claude/commands/`, `.cursor/commands/`, `.agents/skills/` (Codex), `.clinerules/workflows/`, `.windsurf/workflows/`, `.opencode/command/`, `.roo/commands/`, `.kilocode/workflows/`, `.goosehints/`, `.continue/prompts/` |
 
 Codex intentionally uses `.agents/skills/tldrgraph-init/SKILL.md`, not a
-`.codex/commands/` mirror. This is Codex's supported repository-local skill
-location, and TLDRGraph writes the same workflow body there that it writes for
-Claude Code.
+`.codex/commands/` mirror. Codex does not load repository commands from
+`.codex/commands`; its supported repository-local workflow location is
+`.agents/skills`. Open `/skills` and select `tldrgraph-init`, or invoke it as
+`$tldrgraph-init`. TLDRGraph writes the same workflow body there that it writes
+for Claude Code and Cursor.
 
 Tools with a marker directory are installed only when the repo shows them in
 use; `tldrgraph install --all-agents` writes them all. Adding a tool is one row
@@ -160,18 +168,12 @@ No tool gets special treatment. Earlier versions shipped a Claude-only skill fil
 worded differently and each a different length; they contradicted each other
 within a release. `tldrgraph install` deletes those on sight.
 
-### Letting TLDRGraph launch an agent itself
+### Agent execution controls
 
-Off by default, and opt-in per run:
-
-```bash
-tldrgraph init --yes --agent-cli
-```
-
-This shells out to `claude`, `cursor-agent` or `gemini` if one is on `PATH`. It
-is genuinely useful in a plain terminal with no agent attached, but it is not the
-default: agent CLIs differ per tool, block with no output while they think, and
-some IDEs ship no working CLI at all.
+The `tldrgraph-init` workflow is the supported entry point. It can use the
+agent's native session or a portable handoff, and preserves the graph while
+providing the next action if agent work is unavailable. Run the workflow from
+your coding agent; do not invoke `tldrgraph init` directly.
 
 ## 📁 Artifacts & Output Formats
 

@@ -5,18 +5,32 @@ description: Build or continue this repository's TLDRGraph architecture graph (l
 
 # TLDRGraph: build this repository's architecture graph
 
-One command, run repeatedly until it says DONE. `tldrgraph init` never guesses:
-it stops and tells you exactly what it needs.
+In Claude Code or Cursor, invoke `/tldrgraph-init`. In Codex CLI, type `/skills`
+and select `tldrgraph-init`, or mention `$tldrgraph-init` directly.
+
+One command handles layer design, extraction, enrichment, and embeddings:
 
 ```bash
 tldrgraph init
 ```
 
-Read the `NEXT ACTION` block it prints, do what it says, then run `tldrgraph init`
-again. Repeat until the output says `status: done`. There are only three things
-it can ask for.
+By default TLDRGraph detects `claude`, `cursor-agent`, or `gemini`, asks once before enrichment token spend, processes every
+eligible node in batches of 200, and downloads/builds the local embedding model.
+Use `--yes` for non-interactive approval, `--batch N` to override the batch size,
+`--embeddings off|auto|on` to override embeddings, or `--no-agent-cli` for the
+manual file handoff.
 
-## 1. `status: needs_layers`
+After the user approves the full run, use exactly `tldrgraph init --yes`. The
+approval is saved for the current candidate set, so later `tldrgraph init` calls
+must continue without asking again. `--batch 200` means all nodes in 200-node
+batches; `--limit 200` means stop after only 200 nodes. Never add `--limit` or
+`--embeddings off` unless the user explicitly requests a partial or no-embedding run.
+
+If no supported agent is available or dense embeddings cannot be built, `init`
+preserves the graph and prints a resumable status. It never guesses source intent
+or architectural layers.
+
+## `status: needs_layers`
 
 TLDRGraph ships **no layer templates** and will not invent an architecture.
 Design one from this repository.
@@ -47,25 +61,7 @@ Design one from this repository.
 }
 ```
 
-4. Run `tldrgraph init` again.
-
-### What a layer set looks like
-
-Sketches from other codebases, to show the *shape* of an answer. They are not a
-menu and none of them will fit this repository -- read the code and name what you
-actually find.
-
-- A web app might split presentation from request handling from domain logic
-  from persistence, with background jobs and deployment config as their own tiers.
-- A CLI tool might split the command surface from the processing engine from
-  local state, with adapters to outside systems separate again.
-- A library might split its public API from the core implementation from its
-  data types, with backend adapters separate.
-- A data pipeline might split ingestion from transformation from model training
-  from serving.
-
-The useful question is not "which of these is it?" but "where does responsibility
-change hands in *this* code, and what would a new engineer need named?"
+4. Run `tldrgraph init` again; it continues with enrichment and embeddings.
 
 ### Rules that hold for any answer
 
@@ -78,17 +74,17 @@ change hands in *this* code, and what would a new engineer need named?"
 - Derive rules from paths and symbol names you actually saw. A rule matching
   nothing is worse than no rule; a rule matching everything collapses the map.
 
-## 2. `status: needs_confirmation`
+## `status: needs_confirmation`
 
 The output shows how many nodes need enrichment and how many agent round-trips
 that implies. **Ask the user whether to proceed, and show them that estimate.**
 Do not decide for them.
 
-- They agree: `tldrgraph init --yes`
+- They agree: `tldrgraph init --yes` saves approval for the full campaign
 - Smaller first pass: `tldrgraph init --yes --limit 100`
 - They decline: stop. The graph is already built and queryable.
 
-## 3. `status: needs_enrichment`
+## `status: needs_enrichment`
 
 1. Read `.tldrgraph/enrichment_request.yaml`.
 2. **Open the source file of every node in it.** This is the entire point: an
@@ -106,8 +102,14 @@ Do not decide for them.
   calls: [ApplicationsService, pension_cases]
 ```
 
-4. Run `tldrgraph init --yes` again. It applies the response and hands you the
-   next batch, until there is nothing left.
+4. Run `tldrgraph init` again. Approval is already saved. If another
+   `needs_enrichment` batch appears, process it immediately and repeat this loop
+   without asking the user again. Continue until `status: done`.
+
+Inside an existing Codex/Claude/Cursor session, nested-agent protection may stop
+the CLI from launching a second agent. In that case **you are the enrichment
+agent**: process every 200-node batch yourself. A `needs_enrichment` status is a
+continuation instruction, not a reason to stop or request confirmation.
 
 **Copy every `id` verbatim.** A constructed id matches nothing, is dropped, and
 gets reported back to you -- but the work is wasted.

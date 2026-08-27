@@ -16,8 +16,14 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
-from tldrgraph import agent_commands, agent_runner, installer as installer_module, paths
+from tldrgraph import agent_commands, agent_runner, cli_pipeline, installer as installer_module, paths
 from tldrgraph.cli import cli
+from tldrgraph.cli_pipeline import resolve_init_embeddings
+from tldrgraph.init_policy import (
+    APPROVAL_FILENAME,
+    enrichment_approval_is_active,
+    remember_full_enrichment_approval,
+)
 from tldrgraph.propose_layers import (
     NEEDS_LAYERS,
     auto_configure_layers,
@@ -405,7 +411,7 @@ def test_init_applies_the_agents_enrichment_and_reaches_done(cli_repo):
             ]),
             encoding="utf-8",
         )
-        res = runner.invoke(cli, ["init", str(cli_repo), "--yes"])
+        res = runner.invoke(cli, ["init", str(cli_repo)])
         assert res.exit_code == 0, res.output
         if "status: done" in res.output:
             break
@@ -418,6 +424,51 @@ def test_init_applies_the_agents_enrichment_and_reaches_done(cli_repo):
         for n in snapshot["nodes"]
         if n.get("layer_id") != "shared"
     )
+    assert not (state / APPROVAL_FILENAME).exists()
+
+
+def test_full_approval_survives_manual_batches_without_reconfirmation(cli_repo):
+    _answer_layers(cli_repo)
+    runner = CliRunner()
+    first = runner.invoke(cli, ["init", str(cli_repo), "--yes", "--batch", "1"])
+    assert "status: needs_enrichment" in first.output
+
+    state = cli_repo / ".tldrgraph"
+    request = yaml.safe_load((state / "enrichment_request.yaml").read_text(encoding="utf-8"))
+    (state / "enrichment_response.yaml").write_text(
+        yaml.dump([{"id": request["nodes"][0]["id"], "intent": "Source-backed intent."}]),
+        encoding="utf-8",
+    )
+
+    continued = runner.invoke(cli, ["init", str(cli_repo), "--batch", "1"])
+    assert continued.exit_code == 0, continued.output
+    assert "status: needs_confirmation" not in continued.output
+    assert "status: needs_enrichment" in continued.output or "status: done" in continued.output
+
+
+def test_limited_approval_does_not_authorize_the_remaining_campaign(cli_repo):
+    _answer_layers(cli_repo)
+    runner = CliRunner()
+    first = runner.invoke(cli, ["init", str(cli_repo), "--yes", "--limit", "1"])
+    assert "status: needs_enrichment" in first.output
+    assert not (cli_repo / ".tldrgraph" / APPROVAL_FILENAME).exists()
+
+    request = yaml.safe_load(
+        (cli_repo / ".tldrgraph" / "enrichment_request.yaml").read_text(encoding="utf-8")
+    )
+    (cli_repo / ".tldrgraph" / "enrichment_response.yaml").write_text(
+        yaml.dump([{"id": request["nodes"][0]["id"], "intent": "One approved node."}]),
+        encoding="utf-8",
+    )
+    resumed = runner.invoke(cli, ["init", str(cli_repo)])
+    assert "status: needs_confirmation" in resumed.output
+
+
+def test_approval_does_not_cover_new_candidate_ids(tmp_path):
+    approved = [{"id": "a"}, {"id": "b"}]
+    remember_full_enrichment_approval(str(tmp_path), approved)
+    assert enrichment_approval_is_active(str(tmp_path), [{"id": "b"}])
+    assert not enrichment_approval_is_active(str(tmp_path), [{"id": "b"}, {"id": "new"}])
 
 
 def test_an_applied_response_is_not_applied_twice(cli_repo):
@@ -452,18 +503,68 @@ def test_limit_caps_the_first_pass(cli_repo):
     assert len(request["nodes"]) == 2
 
 
-def test_agent_cli_is_opt_in_not_the_default(monkeypatch, cli_repo, agent_allowed):
-    """
-    Shelling out is off unless asked for. It hung a real user's terminal for ten
-    minutes with no output, and it does not generalise across agent tools.
-    """
+def test_agent_cli_is_automatic_by_default(monkeypatch, cli_repo, agent_allowed):
     calls = []
     monkeypatch.setattr(agent_runner, "find_agent_cli",
                         lambda **kw: calls.append(1) or fake_agent())
+    monkeypatch.setattr(agent_runner, "run_agent", lambda *a, **k: _fake_answer(a[1]))
 
     _answer_layers(cli_repo)
-    CliRunner().invoke(cli, ["init", str(cli_repo), "--yes"])
-    assert calls == [], "init must not look for an agent CLI without --agent-cli"
+    res = CliRunner().invoke(cli, ["init", str(cli_repo), "--yes"])
+    assert res.exit_code == 0, res.output
+    assert calls, "init must auto-detect an agent CLI by default"
+    assert "status: done" in res.output
+
+
+def test_no_agent_cli_forces_the_manual_handoff(monkeypatch, cli_repo, agent_allowed):
+    calls = []
+    monkeypatch.setattr(agent_runner, "find_agent_cli",
+                        lambda **kw: calls.append(1) or fake_agent())
+    _answer_layers(cli_repo)
+    res = CliRunner().invoke(cli, ["init", str(cli_repo), "--yes", "--no-agent-cli"])
+    assert res.exit_code == 0, res.output
+    assert calls == []
+    assert "status: needs_enrichment" in res.output
+
+
+def test_init_defaults_to_two_hundred_node_batches():
+    help_result = CliRunner().invoke(cli, ["init", "--help"])
+    assert help_result.exit_code == 0
+    assert "default:" in help_result.output and "200" in help_result.output
+
+
+def test_init_defaults_embeddings_on_but_honours_environment(monkeypatch):
+    monkeypatch.delenv("TLDRGRAPH_EMBEDDINGS", raising=False)
+    assert resolve_init_embeddings(None) == "on"
+    monkeypatch.setenv("TLDRGRAPH_EMBEDDINGS", "off")
+    assert resolve_init_embeddings(None) == "off"
+    assert resolve_init_embeddings("auto") == "auto"
+
+
+def test_interactive_init_asks_once_then_finishes(monkeypatch, cli_repo, agent_allowed):
+    _answer_layers(cli_repo)
+    _stub_agent_cli(monkeypatch)
+    monkeypatch.setattr(cli_pipeline, "stdin_is_interactive", lambda: True)
+    res = CliRunner().invoke(cli, ["init", str(cli_repo)], input="\n")
+    assert res.exit_code == 0, res.output
+    assert res.output.count("Enrich now?") == 1
+    assert "status: done" in res.output
+
+
+def test_automatic_agent_keeps_json_output_parseable(monkeypatch, cli_repo, agent_allowed):
+    _stub_agent_cli(monkeypatch)
+    res = CliRunner().invoke(cli, ["init", str(cli_repo), "--yes", "--json"])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.stdout)["status"] == "done"
+
+
+def test_embedding_failure_is_resumable(monkeypatch, cli_repo, agent_allowed):
+    _stub_agent_cli(monkeypatch)
+    monkeypatch.setattr(cli_pipeline, "_embedding_failure", lambda loader: "model unavailable")
+    res = CliRunner().invoke(cli, ["init", str(cli_repo), "--yes"])
+    assert res.exit_code == 0, res.output
+    assert "status: needs_embeddings" in res.output
+    assert "model unavailable" in res.output
 
 
 def test_agent_cli_runs_the_whole_loop_when_asked(monkeypatch, cli_repo, agent_allowed):
@@ -599,6 +700,10 @@ def test_install_writes_the_gitignore_and_the_one_command(tmp_path):
     assert cmd.is_file()
     body = cmd.read_text(encoding="utf-8")
     assert "tldrgraph init" in body
+    assert "--batch 200" in body and "--limit 200" in body
+    assert "Never add `--limit`" in body and "`--embeddings off` unless" in body
+    assert "without asking the user again" in body
+    assert "/skills" in body and "$tldrgraph-init" in body
     # Every branch of the state machine must be documented in the command.
     for status in ("needs_layers", "needs_confirmation", "needs_enrichment"):
         assert status in body, status
@@ -664,6 +769,12 @@ def test_codex_skill_matches_the_claude_command(tmp_path):
     codex = tmp_path / ".agents" / "skills" / "tldrgraph-init" / "SKILL.md"
     assert codex.is_file()
     assert codex.read_text(encoding="utf-8") == claude.read_text(encoding="utf-8")
+
+
+def test_codex_uses_supported_repo_skill_not_a_dead_dot_codex_command(tmp_path):
+    agent_commands.install_agent_commands(str(tmp_path))
+    assert (tmp_path / ".agents/skills/tldrgraph-init/SKILL.md").is_file()
+    assert not (tmp_path / ".codex/commands/tldrgraph-init.md").exists()
 
 
 def test_no_tool_gets_a_bespoke_extra_artifact(tmp_path):
