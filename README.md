@@ -139,25 +139,25 @@ Surfaces orphaned components, unreferenced models, and unused files for human re
 
 To evaluate codebase localization performance against industry baselines, TLDRGraph was benchmarked on **40 real-world GitHub issues** from the standard **SWE-bench Lite** dataset (measuring ground-truth modified file identification from natural language problem statements):
 
-### 🎯 Highlight: 100.0% Recall@10 & 0.884 MRR
-> **TLDRGraph achieves 100.0% File Recall@10 and 0.884 MRR** on the standard SWE-bench Lite benchmark. By grounding retrieval in agent-designed architectural layers and deterministic cross-layer seams, TLDRGraph completely eliminates missed files—ensuring your coding agent retrieves every single relevant modified file without noise or hallucination.
+### 🎯 Highlight: 100.0% Recall@10 & 0.823 MRR
+> **TLDRGraph achieves 100.0% File Recall@10 and 0.823 MRR** on the standard SWE-bench Lite benchmark across 40 real GitHub tasks. By grounding retrieval in agent-designed architectural layers and deterministic cross-layer seams, TLDRGraph completely eliminates missed files—ensuring your coding agent retrieves every single relevant modified file without noise or hallucination.
 
 | Retrieval Engine | File Recall@1 | File Recall@5 | File Recall@10 | MRR | Context Budget | Search Latency |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **BM25 Lexical Keyword Search** | 55.0% | 65.0% | 77.5% | 0.610 | ~28,500 tokens | 0.94 ms |
-| **Chunked Dense Vector RAG** | 42.5% | 70.0% | 77.5% | 0.535 | ~22,400 tokens | 13.41 ms |
-| **Graphify (AST Knowledge Graph)** | 57.5% | 65.0% | 72.5% | 0.616 | ~9,500 tokens | 0.69 ms |
-| **Aider Repo-Map (AST PageRank)** | 55.0% | 67.5% | 77.5% | 0.611 | ~8,200 tokens | 0.99 ms |
-| **Codebase-Memory-MCP (Vector Memory)** | 42.5% | 65.0% | 72.5% | 0.530 | ~14,200 tokens | 13.31 ms |
-| **PageIndex (Tree-Based ToC)** | 50.0% | 65.0% | 75.0% | 0.573 | ~11,000 tokens | 0.96 ms |
-| **TLDRGraph (AST Zero-Token)** | 60.0% | 75.0% | 82.5% | 0.672 | **~2,400 tokens** | 14.07 ms |
-| **TLDRGraph (Layer-Grounded Slices)** | **82.5%** | **95.0%** | **100.0%** | **0.884** | ~8,000 tokens | 14.28 ms |
+| **BM25 Lexical Keyword Search** | 60.0% | 80.0% | 85.0% | 0.671 | ~28,500 tokens | 15.79 ms |
+| **Chunked Dense Vector RAG** | 70.0% | 95.0% | 95.0% | 0.797 | ~22,400 tokens | 32.82 ms |
+| **Graphify (AST Knowledge Graph)** | 45.0% | 80.0% | 82.5% | 0.591 | ~9,500 tokens | 1.22 ms |
+| **Aider Repo-Map (AST PageRank)** | 17.5% | 50.0% | 72.5% | 0.331 | ~8,200 tokens | 1.95 ms |
+| **Codebase-Memory-MCP (Vector Memory)** | 50.0% | 70.0% | 75.0% | 0.581 | ~14,200 tokens | 32.50 ms |
+| **PageIndex (Tree-Based ToC)** | 52.5% | 82.5% | 85.0% | 0.646 | ~11,000 tokens | 1.24 ms |
+| **TLDRGraph (AST Zero-Token)** | 57.5% | 75.0% | 85.0% | 0.659 | **~2,400 tokens** | 34.20 ms |
+| **TLDRGraph (Layer-Grounded Slices)** | **75.0%** | **92.5%** | **100.0%** | **0.823** | ~8,000 tokens | 81.91 ms |
 
 > **Key Takeaways:**
-> - **100% Recall@10 Flawless Localization**: TLDRGraph (Layer-Grounded Slices) achieves **100.0% Recall@10**, meaning the target modified file is retrieved 100% of the time across all SWE-bench tasks (compared to only 77.5% for Chunked RAG and Aider, and 72.5% for Graphify).
-> - **Unmatched Precision (0.884 MRR & 82.5% Recall@1)**: The correct file is ranked #1 in **82.5%** of queries, drastically outperforming Chunked Dense RAG (42.5%), BM25 (55.0%), and Aider (55.0%).
+> - **100% Recall@10 Flawless Localization**: TLDRGraph (Layer-Grounded Slices) achieves **100.0% Recall@10**, meaning the target modified file is retrieved 100% of the time across all SWE-bench tasks (compared to 95.0% for Chunked RAG, 85.0% for BM25, 82.5% for Graphify, and 72.5% for Aider).
+> - **Unmatched Precision (0.823 MRR & 75.0% Recall@1)**: The correct file is ranked #1 in **75.0%** of queries, outperforming Chunked Dense RAG (70.0%), BM25 (60.0%), and Aider (17.5%).
 > - **Interactive Graphical Architecture Representation**: Beyond text-only context, TLDRGraph pairs dense retrieval with an interactive graphical representation—visualizing multi-layer module topologies and BPMN-style decision workflows directly in your browser.
-> - **Extreme Zero-Token Efficiency**: Even in pure zero-token mode (without any LLM enrichment spend), TLDRGraph scores **82.5% Recall@10** and **0.672 MRR** using only **~2,400 tokens** (nearly 12× smaller than BM25 and 9× smaller than chunked dense RAG).
+> - **Extreme Zero-Token Efficiency**: Even in pure zero-token mode (without any LLM enrichment spend), TLDRGraph scores **85.0% Recall@10** and **0.659 MRR** using only **~2,400 tokens** (nearly 12× smaller than BM25 and 9× smaller than chunked dense RAG).
 
 
 ---
