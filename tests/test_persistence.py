@@ -18,6 +18,7 @@ import json
 
 import pytest
 
+from tldrgraph import __version__
 from tldrgraph import graph_loader as gl_mod
 from tldrgraph.graph_loader import GraphLoader
 
@@ -60,7 +61,7 @@ def test_snapshot_has_schema_envelope(loader, mini_repo, no_network):
     loader.load_or_extract(enrich_llm=True)
     snap = _snapshot(mini_repo)
 
-    assert snap["tldrgraph_version"] == "0.1.0"
+    assert snap["tldrgraph_version"] == __version__
     assert snap["schema_version"] == 1
     assert isinstance(snap["built_at"], str) and snap["built_at"]
     assert isinstance(snap["nodes"], list)
