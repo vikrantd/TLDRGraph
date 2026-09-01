@@ -384,14 +384,34 @@ def test_trace_path_keeps_the_keys_cli_consumes(engine):
 
 def test_format_node_step_shape_is_unchanged(engine):
     step = engine._format_node_step(API_CTRL)
-    assert set(step) == {"id", "label", "layer_id", "layer", "file", "is_test", "intent", "input_fields", "output_fields", "fields"}
+    assert set(step) == {
+        "id", "label", "layer_id", "layer", "file", "source_location", "line",
+        "is_test", "intent", "input_fields", "output_fields", "fields",
+    }
     assert step["label"] == "OrdersController"
+    assert step["source_location"] == "L1"
+    assert step["line"] == 1
 
 
 def test_render_markdown_table_still_renders(engine):
     table = FlowEngine.render_markdown_table(engine.trace_path("DeskView")["steps"])
     assert "Component / Symbol" in table
     assert "OrdersController" in table
+    assert "backend/src/orders/orders.controller.ts:1" in table
+
+
+def test_render_markdown_table_omits_line_suffix_when_unknown():
+    table = FlowEngine.render_markdown_table([
+        {
+            "layer": L3,
+            "label": "NoLineService",
+            "intent": "No line data",
+            "file": "backend/src/no-line.service.ts",
+            "line": None,
+        }
+    ])
+    assert "backend/src/no-line.service.ts" in table
+    assert "backend/src/no-line.service.ts:None" not in table
 
 
 def test_export_flows_yaml_round_trips(engine, tmp_path):

@@ -32,6 +32,7 @@ from .flow_traversal import (
 from .hierarchy import is_test_node
 from .layers import get_registry, layer_id_of
 from .vector_store import LocalVectorStore
+from .visualizer.source import parse_line_number
 
 
 class FlowEngine:
@@ -189,6 +190,7 @@ class FlowEngine:
         input_fields = node_data.get("input_fields", [])
         output_fields = node_data.get("output_fields", [])
         fields = node_data.get("fields", []) or (list(input_fields) + list(output_fields))
+        source_location = node_data.get("source_location")
         is_test = node_data.get("is_test")
         if is_test is None:
             is_test = is_test_node(node_data.get("file", ""), node_data.get("label", ""))
@@ -198,6 +200,8 @@ class FlowEngine:
             "layer_id": self._layer_id_of(node_id),
             "layer": node_data.get("layer", "Unknown"),
             "file": node_data.get("file", ""),
+            "source_location": source_location,
+            "line": parse_line_number(source_location),
             "is_test": bool(is_test),
             "intent": node_data.get("intent") or node_data.get("summary", ""),
             "input_fields": input_fields,
@@ -215,6 +219,14 @@ class FlowEngine:
     @staticmethod
     def render_markdown_table(steps: List[Dict[str, Any]]) -> str:
         headers = ["Layer", "Component / Symbol", "Intent & Action", "Input Fields", "Output Fields", "File Location"]
+
+        def file_location(step: Dict[str, Any]) -> str:
+            file_path = step.get("file", "")
+            line = step.get("line")
+            if file_path and line:
+                return f"{file_path}:{line}"
+            return file_path
+
         rows = [
             [
                 s.get("layer", ""),
@@ -222,7 +234,7 @@ class FlowEngine:
                 s.get("intent", ""),
                 ", ".join(s.get("input_fields", [])) if s.get("input_fields") else (", ".join(s.get("fields", [])) if s.get("fields") else "-"),
                 ", ".join(s.get("output_fields", [])) if s.get("output_fields") else "-",
-                s.get("file", ""),
+                file_location(s),
             ]
             for s in steps
         ]
